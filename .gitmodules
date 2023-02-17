@@ -1,0 +1,3 @@
+[submodule "WatsonWebsocketPlus"]
+	path = WatsonWebsocketPlus
+	url = git@github.com:Zekiah-A/WatsonWebsocketPlus.git

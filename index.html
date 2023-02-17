@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="">
+    <head>
+        <meta charset="utf-8">
+        <title>ConsoleSurf Viewer</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/picnic">
+    </head>
+    <body>
+        <div id="content">
+            <canvas id="canvas" style="position: absolute; width: 100%; height: 100%; top: 0px; left: 0px; z-index: -1;"></canvas>
+            <h3 style="position: absolute; bottom: 0px; left: 4px;">ConsoleSurf Viewer ©Zekiah-A</h3>
+            <button class="error" style="position: absolute; bottom: 4px; right: 4px;">Disconnect from server</button>    
+        </div>
+
+        <div id="loginprompt" class="card" style="display: flex; flex-direction: column; row-gap: 4px;position: absolute; padding: 8px; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(400px, calc(100% - 16px));">
+            <h3>Connect to remote console</h3>
+            <input id="addressInput" type="text" placeholder="Server address">
+            <div style="display: flex; column-gap: 4px; max-height: 40px;">
+                <input id="authKeyInput" type="password" placeholder="Server authentication key">
+                <button style="background-color: grey; line-height: 20px; margin: 0px !important;height: 36px;" onclick="authKeyInput.setAttribute('type', authKeyInput.getAttribute('type') == 'password' ? 'text' : 'password')">view</button>
+            </div>
+            <input id="consoleInput" type="text" min="7" placeholder="Server console">
+            <input id="framerateInput" type="number" min="1" max="60" placeholder="Stream framerate">
+            <button onclick="connect()">Connect to server</button>
+        </div>
+    </body>
+    <script>
+        const serverPacket = {
+            AuthenticationError: 0,
+            ConsoleNotFoundError: 1,
+            Console: 2
+        }
+
+        function connect() {
+            localStorage.server = addressInput.value
+            localStorage.authKey = authKeyInput.value
+            localStorage.console = consoleInput.value
+            localStorage.framerate = framerateInput.value
+
+            let ws = new WebSocket(addressInput.value)
+            
+            ws.onconnect = () => {
+                let encoder = new TextEncoder()
+                let buffer = encoder.encode(authKeyInput.value + "\0x0" + consoleInput.value)
+                buffer[36] = +framerateInput.value
+
+                ws.send(buffer)
+            }
+
+            ws.onmessage = async ({data}) => {
+                data = new DataView(await data.arrayBuffer())
+
+                if (data.getUint8(0) == serverPacket.AuthenticationError) {
+                    alert("Could not authenticate with provided auth key.. try again")
+                    location.reload()
+                }
+                else if (data.getUint8(0) == serverPacket.ConsoleNotFoundError) {
+                    alert("Could not locate desired virtual console, valid consoles start with /dev/tty... or /dev/vc...")
+                    location.reload()
+                    return
+                }
+
+                let buffer = data.slice(1)
+                console.log(buffer)
+            }
+        }
+        
+        addressInput.value = localStorage.server || ""
+        authKeyInput.value = localStorage.authKey || ""
+        consoleInput.value = localStorage.console || ""
+        framerateInput.value = localStorage.framerate || ""
+    </script>
+</html>

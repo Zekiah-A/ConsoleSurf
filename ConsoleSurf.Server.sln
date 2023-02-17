@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ConsoleSurf.Server", "ConsoleSurf.Server\ConsoleSurf.Server.csproj", "{2B1F4029-0B88-4273-B7ED-13957B36E73C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WatsonWebsocket", "WatsonWebsocketPlus\src\WatsonWebsocket\WatsonWebsocket.csproj", "{F489D914-42B0-4817-86FA-4A956C791A65}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{2B1F4029-0B88-4273-B7ED-13957B36E73C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2B1F4029-0B88-4273-B7ED-13957B36E73C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2B1F4029-0B88-4273-B7ED-13957B36E73C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2B1F4029-0B88-4273-B7ED-13957B36E73C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F489D914-42B0-4817-86FA-4A956C791A65}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F489D914-42B0-4817-86FA-4A956C791A65}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F489D914-42B0-4817-86FA-4A956C791A65}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F489D914-42B0-4817-86FA-4A956C791A65}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
