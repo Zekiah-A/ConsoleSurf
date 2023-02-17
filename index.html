@@ -52,11 +52,12 @@
                 data = new DataView(await data.arrayBuffer())
 
                 if (data.getUint8(0) == serverPacket.AuthenticationError) {
-                    alert("Could not authenticate with provided auth key.. try again")
+                    alert("Could not authenticate with provided key.. try again")
                     location.reload()
                 }
                 else if (data.getUint8(0) == serverPacket.ConsoleNotFoundError) {
-                    alert("Could not locate desired virtual console, valid consoles start with /dev/tty... or /dev/vc...")
+                    alert("Could not locate desired virtual console, valid consoles include: "
+                        + new TextDecoder().decode(data.arrayBuffer.slice(1)))
                     location.reload()
                     return
                 }

@@ -19,7 +19,7 @@ if (!File.Exists(AuthenticationKeyFilePath) || (await File.ReadAllTextAsync(Auth
 
 var authenticationKey = await File.ReadAllTextAsync(AuthenticationKeyFilePath);
 var clientRenderTasks = new Dictionary<ClientMetadata, CancellationTokenSource>();
-var server = new WatsonWsServer(1234, false);
+var server = new WatsonWsServer(1234, "localhost");
 
 unsafe
 {
