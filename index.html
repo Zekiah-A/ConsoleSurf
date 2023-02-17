@@ -23,7 +23,7 @@
                     <span style="align-self: center;">Console Y</span>
                     <input id="canvasYInput" type="range" oninput="canvasY = -this.value; applyCanvasTransform()" style="padding: 0px; width: unset; flex-grow: 1;" min="-100" max="100" value="0">
                 </div>
-                <button onclick="fontSizeInput = ''; virtualWidthInput.value = ''; canvasXInput.value = 0; canvasYInput.value = 0; canvasZoomInput.value = ''; fontSize = 12; virtualWidth = 240; canvasX = 0; canvasY = 0; canvasZoom = 1; applyCanvasTransform()">Reset all to default</button>
+                <button onclick="fontSizeInput.value = ''; virtualWidthInput.value = ''; canvasXInput.value = 0; canvasYInput.value = 0; canvasZoomInput.value = ''; fontSize = 12; virtualWidth = 240; canvasX = 0; canvasY = 0; canvasZoom = 1; applyCanvasTransform()">Reset all to default</button>
             </div>
         </div>
 
@@ -101,11 +101,11 @@
 
                 for (i = 0; i < buffer.length; i += virtualWidth) {
                     let chunk = buffer.slice(i, i + virtualWidth)
-                    ctx.fillText(chunk, 0, (i / virtualWidth) * fontSize + fontSize) // row * fontSize
+                    ctx.fillText(chunk, 0, (i / virtualWidth) * fontSize + fontSize) // i / virtualWidth = row
                 }
             }
 
-            ws.closed = () => {
+            ws.onclose = () => {
                 alert("Console connection closed unexpectedly")
                 location.reload()
             }
@@ -120,11 +120,10 @@
                 return
             }
 
-            let buffer = new ArrayBuffer(2)
+            let buffer = new Uint8Array(2)
             buffer[0] = clientPacket.Input
             buffer[1] = event.keyCode
 
-            console.log(buffer)
             ws.send(buffer)
         })
         

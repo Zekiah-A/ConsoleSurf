@@ -1,5 +1,5 @@
 // I can't import the TIOCSTI macro into C#, so instead I use a method
-// within this file to grab the avlue of the TIOCSTI mmacro for use within
+// within this file to grab the value of the TIOCSTI macro for use within
 // the C# server software.
 
 // Compile with

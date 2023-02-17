@@ -8,6 +8,7 @@ using WatsonWebsocket;
 const int SEEK_SET = 0;
 const int SEEK_CUR = 1;
 const int SEEK_END = 2;
+
 var authenticationKeyFilePath = Path.Join(Directory.GetCurrentDirectory(), "authkey.txt");
 
 if (!File.Exists(authenticationKeyFilePath) || (await File.ReadAllTextAsync(authenticationKeyFilePath)).Length != 36)
@@ -77,6 +78,16 @@ unsafe
         return size;
     }
     
+    void SendConsoleNotFound(ClientMetadata client, IEnumerable<string> availableConsoles)
+    {
+        var pathBuffer = Encoding.UTF8.GetBytes(string.Join(", ", availableConsoles.ToArray()));
+        var errorBuffer = new byte[pathBuffer.Length + 1];
+        errorBuffer[0] = (byte) ServerPacket.ConsoleNotFoundError;
+        pathBuffer.CopyTo(errorBuffer, 1);
+                
+        server.SendAsync(client, errorBuffer);
+    }
+
     if (getuid() != 0)
     {
         throw new Exception("Server must be run with [sudo]/administrator privileges.");
@@ -92,20 +103,20 @@ unsafe
         }
         
         var data = args.Data[1..].ToArray();
-        
+
         // Client will send a request packet, with the authentication token for this server instance, desired framerate 
-        // (byte), and the console that they wish to access. The shortest message length would be UUID (36 bytes)
-        // + framerate (1 byte) + /dev/vc (7 bytes) = 44 bytes.
+        // (byte), and the console that they wish to access. The shortest data length would be UUID (36 bytes) +
+        // framerate (1 byte) + /dev/vc (7 bytes) = 44 bytes.
         if (args.Data[0] == (byte) ClientPacket.Authenticate)
         {
-            if (data.Length < 45 || !authenticationKey.Equals(Encoding.UTF8.GetString(data[..36])) ||
+            if (data.Length < 44 || !authenticationKey.Equals(Encoding.UTF8.GetString(data[..36])) ||
                 !rateLimiter.IsAuthorised(IPAddress.Parse(args.Client.IpPort[..args.Client.IpPort.LastIndexOf(":",
-                    StringComparison.Ordinal)])))
+                    StringComparison.Ordinal)])) || clientRenderTasks.ContainsKey(args.Client))
             {
                 server.SendAsync(args.Client, new[] { (byte) ServerPacket.AuthenticationError });
                 return;
             }
-
+            
             var frameInterval = 1000 / Math.Min(data[36], (byte) 60);
             var consolePath = Encoding.UTF8.GetString(data[37..]);
             
@@ -115,16 +126,20 @@ unsafe
 
             if (!availableConsoles.Contains(consolePath))
             {
-                var pathBuffer = Encoding.UTF8.GetBytes(string.Join(", ", availableConsoles.ToArray()));
-                var errorBuffer = new byte[pathBuffer.Length + 1];
-                errorBuffer[0] = (byte) ServerPacket.ConsoleNotFoundError;
-                pathBuffer.CopyTo(errorBuffer, 1);
-                
-                server.SendAsync(args.Client, errorBuffer);
+                SendConsoleNotFound(args.Client, availableConsoles);
+                return;
             }
 
             // Read console display into buffer
             var handle = open(consolePath);
+            
+            // If desired console does not exist, we tell client what does
+            if (handle == -1)
+            {
+                SendConsoleNotFound(args.Client, availableConsoles);
+                return;
+            }
+            
             var length = flength(consolePath);
             var buffer = (char*) NativeMemory.Alloc(new UIntPtr((uint) length));
             // First byte is reserved for packet identifier, used by websocket
