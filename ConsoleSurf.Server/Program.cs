@@ -22,7 +22,7 @@ if (!File.Exists(authenticationKeyFilePath) || (await File.ReadAllTextAsync(auth
 
 var rateLimiter = new RateLimiter(TimeSpan.FromSeconds(3));
 var authenticationKey = await File.ReadAllTextAsync(authenticationKeyFilePath);
-var clientRenderTasks = new Dictionary<ClientMetadata, CancellationTokenSource>();
+var clientRenderTasks = new Dictionary<ClientMetadata, RenderTask>();
 var server = new WatsonWsServer(1234, "localhost");
 
 unsafe
@@ -70,7 +70,7 @@ unsafe
     
     if (getuid() != 0)
     {
-        throw new Exception("Server must be run with [sudo]/administrator privelages.");
+        throw new Exception("Server must be run with [sudo]/administrator privileges.");
     }
 
     // Client will send a request packet, with the authentication token for this server instance, desired framerate 
@@ -108,7 +108,7 @@ unsafe
         // Read console display into buffer
         var handle = open(consolePath);
         var length = flength(consolePath);
-        var buffer = stackalloc char[length];
+        var buffer = (char*) NativeMemory.Alloc(new UIntPtr((uint) length));
         // First byte is reserved for packet identifier, used by websocket
         var managedBuffer = new byte[length + 1];
         managedBuffer[0] = (byte) ServerPacket.Console;
@@ -126,20 +126,22 @@ unsafe
             }
         }, cancelTokenSource.Token);
         
-        clientRenderTasks.Add(args.Client, cancelTokenSource);
+        clientRenderTasks.Add(args.Client, new RenderTask(cancelTokenSource, new IntPtr(buffer)));
     };
 
     server.ClientDisconnected += (sender, args) =>
     {
         // We cancel rendering the display for this client
-        if (!clientRenderTasks.TryGetValue(args.Client, out var renderTokenSource))
+        if (!clientRenderTasks.TryGetValue(args.Client, out var renderTask))
         {
             return;
         }
 
+        // https://stackoverflow.com/questions/18172979/deleting-c-sharp-unsafe-pointers
         try
         {
-            renderTokenSource.Cancel();
+            renderTask.TokenSource.Cancel();
+            NativeMemory.Free((char*) renderTask.BufferPtr);
         }
         catch
         {
@@ -148,7 +150,6 @@ unsafe
         
         clientRenderTasks.Remove(args.Client);
     };
-
 }
 
 var shutdownToken = new CancellationTokenSource();
@@ -172,6 +173,8 @@ enum ServerPacket
     ConsoleNotFoundError,
     Console,
 }
+
+record struct RenderTask(CancellationTokenSource TokenSource, IntPtr BufferPtr);
 
 
 /*
