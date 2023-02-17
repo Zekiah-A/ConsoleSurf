@@ -6,14 +6,27 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/picnic">
     </head>
-    <body>
-        <div id="content">
-            <canvas id="canvas" style="position: absolute; width: 100%; height: 100%; top: 0px; left: 0px; z-index: -1;"></canvas>
+    <body style="overflow: hidden;">
+        <div id="content" style="display: none;">
+            <canvas id="canvas" style="position: absolute; width: 100%; height: 100%; top: 0px; left: 0px; z-index: -1; background-color: black; box-shadow: 0px 0px 20px black;"></canvas>
             <h3 style="position: absolute; bottom: 0px; left: 4px;">ConsoleSurf Viewer ©Zekiah-A</h3>
-            <button class="error" style="position: absolute; bottom: 4px; right: 4px;">Disconnect from server</button>    
+            <button onclick="location.reload()" class="error" style="position: absolute; bottom: 4px; right: 4px;">Disconnect from server</button>
+            <div class="card" style="position: absolute;padding: 8px;display: flex;flex-direction: column;row-gap: 4px;right: 8px;top: 8px;opacity: 0.6; width: min(300px, 100% - 8px);">
+                <input id="virtualWidthInput" type="number" oninput="if (+this.value > 80) virtualWidth = +this.value" min="80" max="800" placeholder="Console width">
+                <input id="canvasZoomInput" type="number" oninput="canvasZoom = this.value; applyCanvasTransform()" min="0.5" max="4" placeholder="Console zoom">
+                <div style="display: flex; column-gap: 4px;">
+                    <span style="align-self: center;">Console X</span>
+                    <input id="canvasXInput" type="range" oninput="canvasX = -this.value; applyCanvasTransform()" style="padding: 0px; width: unset; flex-grow: 1;" min="-100" max="100" value="0">
+                </div>
+                <div style="display: flex; column-gap: 4px;">
+                    <span style="align-self: center;">Console Y</span>
+                    <input id="canvasYInput" type="range" oninput="canvasY = -this.value; applyCanvasTransform()" style="padding: 0px; width: unset; flex-grow: 1;" min="-100" max="100" value="0">
+                </div>
+                <button onclick="virtualWidthInput.value = ''; canvasXInput.value = 0; canvasYInput.value = 0; canvasZoomInput.value = ''; virtualWidth = 80; canvasX = 0; canvasY = 0; canvasZoom = 1; applyCanvasTransform()">Reset all to default</button>
+            </div>
         </div>
 
-        <div id="loginprompt" class="card" style="display: flex; flex-direction: column; row-gap: 4px;position: absolute; padding: 8px; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(400px, calc(100% - 16px));">
+        <div id="loginPrompt" class="card" style="display: flex; flex-direction: column; row-gap: 4px;position: absolute; padding: 8px; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(400px, calc(100% - 16px));">
             <h3>Connect to remote console</h3>
             <input id="addressInput" type="text" placeholder="Server address">
             <div style="display: flex; column-gap: 4px; max-height: 40px;">
@@ -26,6 +39,12 @@
         </div>
     </body>
     <script>
+        let ws = null
+        const ctx = canvas.getContext("2d")
+        const decoder = new TextDecoder("utf-8")
+        const encoder = new TextEncoder()
+        let virtualWidth = 80
+
         const serverPacket = {
             AuthenticationError: 0,
             ConsoleNotFoundError: 1,
@@ -38,14 +57,16 @@
             localStorage.console = consoleInput.value
             localStorage.framerate = framerateInput.value
 
-            let ws = new WebSocket(addressInput.value)
+            ws = new WebSocket(addressInput.value)
             
-            ws.onconnect = () => {
-                let encoder = new TextEncoder()
-                let buffer = encoder.encode(authKeyInput.value + "\0x0" + consoleInput.value)
+            ws.onopen = () => {
+                let buffer = encoder.encode(authKeyInput.value + "_" + consoleInput.value)
                 buffer[36] = +framerateInput.value
-
                 ws.send(buffer)
+
+                loginPrompt.style.display = "none"
+                content.style.display = "block"
+                document.body.style.backgroundColor = "darkGrey"
             }
 
             ws.onmessage = async ({data}) => {
@@ -57,16 +78,41 @@
                 }
                 else if (data.getUint8(0) == serverPacket.ConsoleNotFoundError) {
                     alert("Could not locate desired virtual console, valid consoles include: "
-                        + new TextDecoder().decode(data.arrayBuffer.slice(1)))
+                        + decoder.decode(data.buffer.slice(1)))
                     location.reload()
                     return
                 }
 
-                let buffer = data.slice(1)
-                console.log(buffer)
+                let buffer = decoder.decode(data.buffer.slice(1))
+                ctx.clearRect(0, 0, canvas.width, canvas.height)
+                ctx.font = "12px Menlo, Consolas, monospace"
+                ctx.fillStyle = "white"
+
+                for (i = 0; i < buffer.length; i += virtualWidth) {
+                    let chunk = buffer.slice(i, i + virtualWidth)
+                    ctx.fillText(chunk, 0, (i / virtualWidth) * 12) // row * fontSize
+                }
+            }
+
+            ws.onerror = (error) => {
+                console.error(error)
             }
         }
         
+        let canvasX = 0
+        let canvasY = 0
+        let canvasZoom = 1
+        function applyCanvasTransform() {
+            canvas.style.transform = `translate(${canvasX}%, ${canvasY}%) scale(${canvasZoom})`
+        }
+
+        function resizeCanvas() {
+            canvas.width = innerWidth
+            canvas.height = innerHeight
+        }
+        addEventListener("resize", resizeCanvas)
+        resizeCanvas()
+
         addressInput.value = localStorage.server || ""
         authKeyInput.value = localStorage.authKey || ""
         consoleInput.value = localStorage.console || ""

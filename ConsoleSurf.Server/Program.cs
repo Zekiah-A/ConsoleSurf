@@ -1,23 +1,27 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.Net;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text;
+using ConsoleSurf.Server;
 using WatsonWebsocket;
 
 const int SEEK_SET = 0;
 const int SEEK_CUR = 1;
 const int SEEK_END = 2;
-const string AuthenticationKeyFilePath = "authkey.txt";
+var authenticationKeyFilePath = Path.Join(Directory.GetCurrentDirectory(), "authkey.txt");
 
-if (!File.Exists(AuthenticationKeyFilePath) || (await File.ReadAllTextAsync(AuthenticationKeyFilePath)).Length != 36)
+if (!File.Exists(authenticationKeyFilePath) || (await File.ReadAllTextAsync(authenticationKeyFilePath)).Length != 36)
 {
-    await File.WriteAllTextAsync(AuthenticationKeyFilePath, Guid.NewGuid().ToString());
+    await File.WriteAllTextAsync(authenticationKeyFilePath, Guid.NewGuid().ToString());
     Console.ForegroundColor = ConsoleColor.Green;
     Console.WriteLine("Created auth key file! A secure, randomly generated UUID has been placed into this file for " + 
                       "use of client authentication. You may replace this key with your own by modifying the file '" + 
-                      AuthenticationKeyFilePath + "'.");
+                      authenticationKeyFilePath + "'.");
     Console.ResetColor();
 }
 
-var authenticationKey = await File.ReadAllTextAsync(AuthenticationKeyFilePath);
+var rateLimiter = new RateLimiter(TimeSpan.FromSeconds(3));
+var authenticationKey = await File.ReadAllTextAsync(authenticationKeyFilePath);
 var clientRenderTasks = new Dictionary<ClientMetadata, CancellationTokenSource>();
 var server = new WatsonWsServer(1234, "localhost");
 
@@ -47,6 +51,9 @@ unsafe
     [DllImport("libc")]
     static extern int fclose(void* filePtr); // FILE*
     
+    [DllImport("libc")]
+    static extern uint getuid();
+    
     int flength(string filePath)
     {
         var file = fopen(filePath, "r");
@@ -60,28 +67,35 @@ unsafe
         fclose(file);
         return size;
     }
-
-    Console.WriteLine("Server started, listening");
     
+    if (getuid() != 0)
+    {
+        throw new Exception("Server must be run with [sudo]/administrator privelages.");
+    }
+
     // Client will send a request packet, with the authentication token for this server instance, desired framerate 
     // (byte), and the console that they wish to access. The shortest message length would be UUID (36 bytes)
     // + framerate (1 byte) + /dev/vc (7 bytes) = 44 bytes.
     server.MessageReceived += (sender, args) =>
     {
-        if (args.Data.Count < 44 || Encoding.UTF8.GetString(args.Data[..36]) != authenticationKey)
+        var data = args.Data.ToArray();
+
+        if (data.Length < 44 || !authenticationKey.Equals(Encoding.UTF8.GetString(data[..36])) ||
+            !rateLimiter.IsAuthorised(IPAddress.Parse(args.Client.IpPort[..args.Client.IpPort.LastIndexOf(":",
+                StringComparison.Ordinal)])))
         {
             server.SendAsync(args.Client, new[] { (byte) ServerPacket.AuthenticationError });
             return;
         }
 
-        var frameInterval = 1000 / Math.Min(args.Data[36], (byte) 60);
-        var consolePath = Encoding.UTF8.GetString(args.Data[37..]);
+        var frameInterval = 1000 / Math.Min(data[36], (byte) 60);
+        var consolePath = Encoding.UTF8.GetString(data[37..]);
         
         // Verify we can open devices
         var availableConsoles = Directory.GetFiles("/dev/")
             .Where(filePath => filePath.StartsWith("/dev/tty") || filePath.StartsWith("/dev/vc")).ToList();
 
-        if (consolePath is null || !availableConsoles.Contains(consolePath))
+        if (!availableConsoles.Contains(consolePath))
         {
             var pathBuffer = Encoding.UTF8.GetBytes(string.Join(", ", availableConsoles.ToArray()));
             var errorBuffer = new byte[pathBuffer.Length + 1];
@@ -122,8 +136,16 @@ unsafe
         {
             return;
         }
+
+        try
+        {
+            renderTokenSource.Cancel();
+        }
+        catch
+        {
+            // Cancelling the token will likely throw an exception, ignore.    
+        }
         
-        renderTokenSource.Cancel();
         clientRenderTasks.Remove(args.Client);
     };
 
@@ -140,6 +162,7 @@ Console.CancelKeyPress += (_, _) =>
     shutdownToken.Cancel();
 };
 
+Console.WriteLine("Server started successfully, listening");
 await server.StartAsync();
 await Task.Delay(-1, shutdownToken.Token);
 
