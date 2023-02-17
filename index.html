@@ -12,6 +12,7 @@
             <h3 style="position: absolute; bottom: 0px; left: 4px;">ConsoleSurf Viewer ©Zekiah-A</h3>
             <button onclick="location.reload()" class="error" style="position: absolute; bottom: 4px; right: 4px;">Disconnect from server</button>
             <div class="card" style="position: absolute;padding: 8px;display: flex;flex-direction: column;row-gap: 4px;right: 8px;top: 8px;opacity: 0.8; width: min(300px, 100% - 8px);">
+                <input id="fontSizeInput" type="number" oninput="if (+this.value > 4) fontSize = +this.value" min="4" max="96" placeholder="Console font size">
                 <input id="virtualWidthInput" type="number" oninput="if (+this.value > 80) virtualWidth = +this.value" min="80" max="800" placeholder="Console width">
                 <input id="canvasZoomInput" type="number" oninput="canvasZoom = this.value; applyCanvasTransform()" min="0.5" max="4" placeholder="Console zoom">
                 <div style="display: flex; column-gap: 4px;">
@@ -22,7 +23,7 @@
                     <span style="align-self: center;">Console Y</span>
                     <input id="canvasYInput" type="range" oninput="canvasY = -this.value; applyCanvasTransform()" style="padding: 0px; width: unset; flex-grow: 1;" min="-100" max="100" value="0">
                 </div>
-                <button onclick="virtualWidthInput.value = ''; canvasXInput.value = 0; canvasYInput.value = 0; canvasZoomInput.value = ''; virtualWidth = 240; canvasX = 0; canvasY = 0; canvasZoom = 1; applyCanvasTransform()">Reset all to default</button>
+                <button onclick="fontSizeInput = ''; virtualWidthInput.value = ''; canvasXInput.value = 0; canvasYInput.value = 0; canvasZoomInput.value = ''; fontSize = 12; virtualWidth = 240; canvasX = 0; canvasY = 0; canvasZoom = 1; applyCanvasTransform()">Reset all to default</button>
             </div>
         </div>
 
@@ -44,11 +45,17 @@
         const decoder = new TextDecoder("utf-8")
         const encoder = new TextEncoder()
         let virtualWidth = 240
+        let fontSize = 12
 
         const serverPacket = {
             AuthenticationError: 0,
             ConsoleNotFoundError: 1,
             Console: 2
+        }
+
+        const clientPacket = {
+            Authenticate: 0,
+            Input: 1
         }
 
         function connect() {
@@ -60,8 +67,9 @@
             ws = new WebSocket(addressInput.value)
             
             ws.onopen = () => {
-                let buffer = encoder.encode(authKeyInput.value + "_" + consoleInput.value)
-                buffer[36] = +framerateInput.value
+                let buffer = encoder.encode("_" + authKeyInput.value + "_" + consoleInput.value)
+                buffer[0] = clientPacket.Authenticate
+                buffer[37] = +framerateInput.value
                 ws.send(buffer)
 
                 loginPrompt.style.display = "none"
@@ -88,19 +96,37 @@
 
                 // Draw to canvas
                 ctx.clearRect(0, 0, canvas.width, canvas.height)
-                ctx.font = "12px Menlo, Consolas, monospace"
+                ctx.font = fontSize + "px Menlo, Consolas, monospace"
                 ctx.fillStyle = "white"
 
                 for (i = 0; i < buffer.length; i += virtualWidth) {
                     let chunk = buffer.slice(i, i + virtualWidth)
-                    ctx.fillText(chunk, 0, (i / virtualWidth) * 12) // row * fontSize
+                    ctx.fillText(chunk, 0, (i / virtualWidth) * fontSize + fontSize) // row * fontSize
                 }
+            }
+
+            ws.closed = () => {
+                alert("Console connection closed unexpectedly")
+                location.reload()
             }
 
             ws.onerror = (error) => {
                 console.error(error)
             }
         }
+
+        addEventListener('keydown', (event) => {
+            if (event.target != document.body) {
+                return
+            }
+
+            let buffer = new ArrayBuffer(2)
+            buffer[0] = clientPacket.Input
+            buffer[1] = event.keyCode
+
+            console.log(buffer)
+            ws.send(buffer)
+        })
         
         let canvasX = 0
         let canvasY = 0

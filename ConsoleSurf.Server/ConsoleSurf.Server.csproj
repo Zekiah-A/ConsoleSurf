@@ -16,4 +16,7 @@
       <ProjectReference Include="..\WatsonWebsocketPlus\src\WatsonWebsocket\WatsonWebsocket.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+        <Resource Include=".\tiocsti.so" CopyToOutputDirectory="Always" />
+    </ItemGroup>
 </Project>
