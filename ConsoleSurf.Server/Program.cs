@@ -61,9 +61,6 @@ unsafe
     
     [DllImport("libc")]
     static extern uint getuid();
-
-    [DllImport("./tiocsti.so")]
-    static extern ulong get_tiocsti();
     
     int flength(string filePath)
     {
@@ -98,7 +95,7 @@ unsafe
     ulong KDGKBMODE = 0x4B44;
     ulong KDSKBMODE = 0x4B45;
     ulong KDSETMODE = 0x4B3A;
-    ulong TIOCSTI = get_tiocsti();
+    ulong TIOCSTI = 0x5412;
 
     server.MessageReceived += (sender, args) =>
     {
