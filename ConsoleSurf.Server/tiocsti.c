@@ -7,6 +7,6 @@
 // $ gcc -shared -o tiocsti.so tiocsti.o
 #include <sys/ioctl.h>
 
-extern int get_tiocsti() {
+extern unsigned long get_tiocsti() {
     return TIOCSTI;
 }

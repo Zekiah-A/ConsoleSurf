@@ -46,6 +46,10 @@
         const encoder = new TextEncoder()
         let virtualWidth = 240
         let fontSize = 12
+        let firstReceive = true
+        let currentX = 0
+        let currentY = 0
+        let frame = 0
 
         const serverPacket = {
             AuthenticationError: 0,
@@ -56,6 +60,94 @@
         const clientPacket = {
             Authenticate: 0,
             Input: 1
+        }
+
+        // https://github.com/torvalds/linux/blob/master/include/uapi/linux/input-event-codes.h
+        // We translate inputs to linux key codes so that they can pass through ioctl nicely.
+        const keyMap = {
+            "Escape": 1,
+            "Digit1": 2,
+            "Digit2": 3,
+            "Digit3": 4,
+            "Digit4": 5,
+            "Digit5": 6,
+            "Digit6": 7,
+            "Digit7": 8,
+            "Digit8": 9,
+            "Digit9": 10,
+            "Digit0": 11,
+            "Minus": 12,
+            "Equal": 13,
+            "Backspace": 14,
+            "Tab": 15,
+            "KeyQ":	16,
+            "KeyW":	17,
+            "KeyE":	18,
+            "KeyR":	19,
+            "KeyT":	20,
+            "KeyY":	21,
+            "KeyU":	22,
+            "KeyI":	23,
+            "KeyO":	24,
+            "KeyP":	25,
+            "BracketLeft": 26,
+            "BracketRight": 27,
+            "Enter": 28,
+            "ControlLeft": 29,
+            "KeyA":	30,
+            "KeyS":	31,
+            "KeyD":	32,
+            "KeyF":	33,
+            "KeyG":	34,
+            "KeyH":	35,
+            "KeyJ":	36,
+            "KeyK":	37,
+            "KeyL":	38,
+            "Semicolon": 39,
+            "Quote": 40, //dodgy
+            "Backquote": 41, // dodgy
+            "ShiftLeft": 42,
+            "IntlBackslash": 43,
+            "KeyZ": 44,
+            "KeyX":	45,
+            "KeyC":	46,
+            "KeyV":	47,
+            "KeyB":	48,
+            "KeyN":	49,
+            "KeyM":	50,
+            "Comma":51,
+            "Period": 52,
+            "Slash": 53,
+            "ShiftRight": 54,
+            "NumpadMultiply": 55, //dodgy
+            "AltLeft": 56,
+            "Space": 57,
+            "CapsLock": 58,
+            "F1": 59,
+            "F2": 60,
+            "F3": 61,
+            "F4": 62,
+            "F5": 63,
+            "F6": 64,
+            "F7": 65,
+            "F8": 66,
+            "F9": 67,
+            "F10": 68,
+            "NumLock": 69,
+            "ScrollLock": 70,
+            "Numpad7": 71,
+            "Numpad8": 72,
+            "Numpad9": 73,
+            "NumpadSubtract": 74,
+            "Numpad4": 75,
+            "Numpad5": 76,
+            "Numpad6": 77,
+            "NumpadAdd": 78,
+            "Numpad1": 79,
+            "Numpad2": 80,
+            "Numpad3": 81,
+            "Numpad0": 82,
+            "NumpadDecimal": 83
         }
 
         function connect() {
@@ -91,7 +183,14 @@
                     return
                 }
 
-                let buffer = decoder.decode(data.buffer.slice(1))
+                // Virtual consoles will start with a vidbuf struct (unsigned char vidbuf_lines; unsigned char vidbuf_columns;
+                // unsigned char vidbuf_curcolumn; unsigned char vidbuf_curline;). We use this to get a little info about the console.
+                if (firstReceive) {
+                    virtualWidth = data.getUint8(2)
+                    firstReceive = false
+                }
+
+                let buffer = decoder.decode(data.buffer.slice(5))
                 buffer = buffer.replaceAll("\u0007", "") // Strip bell
 
                 // Draw to canvas
@@ -103,6 +202,12 @@
                     let chunk = buffer.slice(i, i + virtualWidth)
                     ctx.fillText(chunk, 0, (i / virtualWidth) * fontSize + fontSize) // i / virtualWidth = row
                 }
+
+                // We use the vidbuf info to draw a cursor at the current text position (with blink)
+                if ((frame % framerateInput.value) > framerateInput.value / 2) {
+                    ctx.fillRect(data.getUint8(3) * fontSize, data.getUint8(4) * fontSize, fontSize / 6, fontSize)
+                }
+                frame++
             }
 
             ws.onclose = () => {
@@ -116,13 +221,13 @@
         }
 
         addEventListener('keydown', (event) => {
-            if (event.target != document.body) {
+            if (event.target != document.body || keyMap[event.code] == null) {
                 return
             }
 
             let buffer = new Uint8Array(2)
             buffer[0] = clientPacket.Input
-            buffer[1] = event.keyCode
+            buffer[1] = keyMap[event.code]
 
             ws.send(buffer)
         })

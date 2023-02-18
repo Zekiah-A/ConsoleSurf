@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
@@ -44,7 +45,7 @@ unsafe
     static extern int lseek(int fileHandle, int offset, int whence);
     
     [DllImport("libc")]
-    static extern int ioctl(int fd, ulong request, char* character);
+    static extern int ioctl(int fd, ulong request, void* data);
 
     [DllImport("libc")]
     static extern int fseek(void* fileHandle, int offset, int whence); // FILE*
@@ -62,7 +63,7 @@ unsafe
     static extern uint getuid();
 
     [DllImport("./tiocsti.so")]
-    static extern int get_tiocsti();
+    static extern ulong get_tiocsti();
     
     int flength(string filePath)
     {
@@ -92,8 +93,12 @@ unsafe
     {
         throw new Exception("Server must be run with [sudo]/administrator privileges.");
     }
-
-    var TIOCSTI = get_tiocsti();
+    
+    // https://github.com/torvalds/linux/blob/master/include/uapi/linux/kd.h
+    ulong KDGKBMODE = 0x4B44;
+    ulong KDSKBMODE = 0x4B45;
+    ulong KDSETMODE = 0x4B3A;
+    ulong TIOCSTI = get_tiocsti();
 
     server.MessageReceived += (sender, args) =>
     {
@@ -142,6 +147,7 @@ unsafe
             
             var length = flength(consolePath);
             var buffer = (char*) NativeMemory.Alloc(new UIntPtr((uint) length));
+            
             // First byte is reserved for packet identifier, used by websocket
             var managedBuffer = new byte[length + 1];
             managedBuffer[0] = (byte) ServerPacket.Console;
@@ -170,11 +176,39 @@ unsafe
                 return;
             }
             
+            // Try get keyboard into text (console, non graphical mode) so we can send commands to virtual console
+            // https://www.linuxjournal.com/article/2783, https://man7.org/linux/man-pages/man2/ioctl_console.2.html
+            ulong KD_TEXT = 0x00;
+            var keyboardMode = ioctl(renderTask.FileHandle, KDSETMODE, &KD_TEXT);
+            if (keyboardMode == -1)
+            {
+                Console.WriteLine($"Error switching keyboard mode, keyboard mode: {keyboardMode}");
+            }
+            
+            // Check if keyboard is in scan code mode (giving ASCII characters to a program expecting
+            // scan codes will confuse it), if it isn't, attempt to change the keyboard mode, or just return.
+            ulong K_XLATE = 0x01;
+            ulong K_UNICODE = 0x03;
+            uint keyboardState = 0;
+            ioctl(renderTask.FileHandle, KDGKBMODE, &keyboardState);
+            if (keyboardState != K_XLATE && keyboardState != K_UNICODE)
+            {
+                var unicodeKeyboardPtr = &K_UNICODE;
+                
+                if (ioctl(renderTask.FileHandle, KDSKBMODE, unicodeKeyboardPtr) == -1)
+                {
+                    Console.WriteLine($"Error switching keyboard state, keyboard mode: {keyboardState}");
+                }
+            }
+            
             fixed (byte* charPtr = &data[0])
             {
                 // TIOCSTI is request for simulating a terminal input
                 // https://www.qnx.com/developers/docs/7.1/#com.qnx.doc.neutrino.devctl/topic/tioc/tiocsti.html
-                ioctl(renderTask.FileHandle, (ulong) TIOCSTI, (char*) charPtr);
+                if (ioctl(renderTask.FileHandle, TIOCSTI, (char*) charPtr) == -1)
+                {
+                    Console.WriteLine($"Error handling input, char code: {data[0]}, keyboard state: {keyboardState}");
+                }
             }
         }
     };
@@ -221,13 +255,23 @@ enum ServerPacket
 {
     AuthenticationError,
     ConsoleNotFoundError,
-    Console,
+    Console
 }
 
 enum ClientPacket
 {
     Authenticate,
     Input
+}
+
+//The data returned by reading a /dev/vcsa device
+internal struct VideoBuffer
+{
+    public byte Lines; // Line on screen
+    public byte Columns; // Columns on screen
+    public byte CurrentColumn; // Column cursor is in
+    public byte CurrentLine; // Line cursor is in
+    public byte[] Data; // The text on the screen
 }
 
 record struct RenderTask(CancellationTokenSource TokenSource, int FileHandle, IntPtr BufferPtr);
