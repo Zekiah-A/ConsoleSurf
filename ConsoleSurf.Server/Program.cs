@@ -127,7 +127,7 @@ unsafe
             
             // Verify we can open devices
             var availableConsoles = Directory.GetFiles("/dev/")
-                .Where(filePath => filePath.StartsWith("/dev/tty") || filePath.StartsWith("/dev/vc")).ToList();
+                .Where(filePath => filePath.StartsWith("/dev/vc")).ToList();
 
             if (!availableConsoles.Contains(consolePath))
             {

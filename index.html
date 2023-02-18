@@ -23,7 +23,7 @@
                     <span style="align-self: center;">Console Y</span>
                     <input id="canvasYInput" type="range" oninput="canvasY = -this.value; applyCanvasTransform()" style="padding: 0px; width: unset; flex-grow: 1;" min="-100" max="100" value="0">
                 </div>
-                <button onclick="fontSizeInput.value = ''; virtualWidthInput.value = ''; canvasXInput.value = 0; canvasYInput.value = 0; canvasZoomInput.value = ''; fontSize = 12; virtualWidth = 240; canvasX = 0; canvasY = 0; canvasZoom = 1; applyCanvasTransform()">Reset all to default</button>
+                <button onclick="fontSizeInput.value = ''; virtualWidthInput.value = ''; canvasXInput.value = 0; canvasYInput.value = 0; canvasZoomInput.value = ''; fontSize = 12; virtualWidth = defaultVirtualWidth; canvasX = 0; canvasY = 0; canvasZoom = 1; applyCanvasTransform()">Reset all to default</button>
             </div>
         </div>
 
@@ -44,6 +44,7 @@
         const ctx = canvas.getContext("2d")
         const decoder = new TextDecoder("utf-8")
         const encoder = new TextEncoder()
+        let defaultVirtualWidth = 240
         let virtualWidth = 240
         let fontSize = 12
         let firstReceive = true
@@ -186,6 +187,7 @@
                 // Virtual consoles will start with a vidbuf struct (unsigned char vidbuf_lines; unsigned char vidbuf_columns;
                 // unsigned char vidbuf_curcolumn; unsigned char vidbuf_curline;). We use this to get a little info about the console.
                 if (firstReceive) {
+                    defaultVirtualWidth = data.getUint8(2)
                     virtualWidth = data.getUint8(2)
                     firstReceive = false
                 }
