@@ -261,14 +261,4 @@ enum ClientPacket
     Input
 }
 
-//The data returned by reading a /dev/vcsa device
-internal struct VideoBuffer
-{
-    public byte Lines; // Line on screen
-    public byte Columns; // Columns on screen
-    public byte CurrentColumn; // Column cursor is in
-    public byte CurrentLine; // Line cursor is in
-    public byte[] Data; // The text on the screen
-}
-
 record struct RenderTask(CancellationTokenSource TokenSource, int FileHandle, IntPtr BufferPtr);
