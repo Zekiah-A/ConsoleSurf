@@ -33,7 +33,7 @@ unsafe
     static extern void printf(string pattern, string args);
 
     [DllImport("libc")]
-    static extern int open(string path);
+    static extern int open(string path, int flags);
 
     [DllImport("libc")]
     static extern void read(int fileHandle, void* buffer, uint nBytes);
@@ -61,6 +61,9 @@ unsafe
     
     [DllImport("libc")]
     static extern uint getuid();
+
+    [DllImport("libc")]
+    static extern int* __errno_location();
     
     int flength(string filePath)
     {
@@ -96,7 +99,10 @@ unsafe
     ulong KDSKBMODE = 0x4B45;
     ulong KDSETMODE = 0x4B3A;
     ulong TIOCSTI = 0x5412;
-
+    const int O_RDONLY = 00000000;
+    const int O_WRONLY = 00000001;
+    const int O_RDWR = 00000002;
+    
     server.MessageReceived += (sender, args) =>
     {
         if (args.Data.Count == 0)
@@ -122,7 +128,7 @@ unsafe
             var frameInterval = 1000 / Math.Min(data[36], (byte) 60);
             var consolePath = Encoding.UTF8.GetString(data[37..]);
             
-            // Verify we can open devices
+            // Verify we can open devices, example paths are /dev/vcsa22, or /dev/vcc/a22
             var availableConsoles = Directory.GetFiles("/dev/")
                 .Where(filePath => filePath.StartsWith("/dev/vc")).ToList();
 
@@ -132,8 +138,8 @@ unsafe
                 return;
             }
 
-            // Read console display into buffer
-            var handle = open(consolePath);
+            // Read console display into buffer, with read write perms
+            var handle = open(consolePath, O_RDWR);
             
             // If desired console does not exist, we tell client what does
             if (handle == -1)
@@ -179,7 +185,7 @@ unsafe
             var keyboardMode = ioctl(renderTask.FileHandle, KDSETMODE, &KD_TEXT);
             if (keyboardMode == -1)
             {
-                Console.WriteLine($"Error switching keyboard mode, keyboard mode: {keyboardMode}");
+                Console.WriteLine($"Error switching keyboard mode {(Error) (*__errno_location())}, keyboard mode: {keyboardMode}");
             }
             
             // Check if keyboard is in scan code mode (giving ASCII characters to a program expecting
@@ -194,7 +200,7 @@ unsafe
                 
                 if (ioctl(renderTask.FileHandle, KDSKBMODE, unicodeKeyboardPtr) == -1)
                 {
-                    Console.WriteLine($"Error switching keyboard state, keyboard mode: {keyboardState}");
+                    Console.WriteLine($"Error switching keyboard state {(Error) (*__errno_location())}, keyboard state: {keyboardState}");
                 }
             }
             
@@ -204,7 +210,7 @@ unsafe
                 // https://www.qnx.com/developers/docs/7.1/#com.qnx.doc.neutrino.devctl/topic/tioc/tiocsti.html
                 if (ioctl(renderTask.FileHandle, TIOCSTI, (char*) charPtr) == -1)
                 {
-                    Console.WriteLine($"Error handling input, char code: {data[0]}, keyboard state: {keyboardState}");
+                    Console.WriteLine($"Error handling input {(Error) (*__errno_location())}, char code: {data[0]}");
                 }
             }
         }
@@ -223,6 +229,7 @@ unsafe
         {
             renderTask.TokenSource.Cancel();
             NativeMemory.Free((char*) renderTask.BufferPtr);
+            close(renderTask.FileHandle);
         }
         catch
         {
