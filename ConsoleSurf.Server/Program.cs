@@ -48,10 +48,10 @@ unsafe
     static extern int ioctl(int fd, ulong request, void* data);
 
     [DllImport("libc")]
-    static extern int fseek(void* fileHandle, int offset, int whence); // FILE*
+    static extern int fseek(void* filePtr, int offset, int whence); // FILE*
     
     [DllImport("libc")]
-    static extern int ftell(void* fileHandle); // FILE*
+    static extern int ftell(void* filePtr); // FILE*
     
     [DllImport("libc")]
     static extern void* fopen(string path, string access); // FILE*
@@ -64,6 +64,12 @@ unsafe
 
     [DllImport("libc")]
     static extern int* __errno_location();
+
+    [DllImport("libc")]
+    static extern int tcgetattr(int fileHandle, void* termiosPtr);
+    
+    [DllImport("libc")]
+    static extern int tcsetattr(int fileHandle, int request, void* termiosPtr);
     
     int flength(string filePath)
     {
@@ -102,6 +108,9 @@ unsafe
     const int O_RDONLY = 00000000;
     const int O_WRONLY = 00000001;
     const int O_RDWR = 00000002;
+    // https://man7.org/linux/man-pages/man3/termios.3.html
+    const int ICANON = 0x00000100;
+    const int TCSANOW = 0x2;
     
     server.MessageReceived += (sender, args) =>
     {
@@ -140,6 +149,20 @@ unsafe
 
             // Read console display into buffer, with read write perms
             var handle = open(consolePath, O_RDWR);
+            
+            // Make sure terminal is in canonical mode
+            void* unmanagedTermios;
+            if (tcgetattr(handle, &unmanagedTermios) < 0) {
+                Console.WriteLine("Terminal is not in canonical mode, switching");
+            }
+            var tio = (Termios) Marshal.PtrToStructure(new IntPtr(unmanagedTermios), typeof(Termios))!;
+
+            // Set terminal to canonical mode
+            tio.c_lflag |= ICANON;
+            Marshal.StructureToPtr(tio, new IntPtr(unmanagedTermios), false);
+            if (tcsetattr(handle, TCSANOW, &unmanagedTermios) < 0) {
+                Console.WriteLine("Could not set terminal to canonical mode");
+            }
             
             // If desired console does not exist, we tell client what does
             if (handle == -1)
@@ -269,3 +292,15 @@ enum ClientPacket
 }
 
 record struct RenderTask(CancellationTokenSource TokenSource, int FileHandle, IntPtr BufferPtr);
+
+[StructLayout(LayoutKind.Sequential)]
+struct Termios
+{
+    public ulong c_iflag;		/* input mode flags */
+    public ulong c_oflag;		/* output mode flags */
+    public ulong c_cflag;		/* control mode flags */
+    public ulong c_lflag;		/* local mode flags */
+    public byte c_line;		/* line discipline */
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 17)]
+    public byte[] c_cc;	/* control characters */
+};
