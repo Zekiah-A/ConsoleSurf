@@ -71,6 +71,11 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
 
         // Read console display into buffer, with read write perms
         int fileDescriptor = open(consolePath, O_RDWR);
+        if (fileDescriptor == -1) {
+            char err = SERVER_CONSOLE_NOT_FOUND_ERROR;
+            ws_sendframe_bin(NULL, &err, 1);
+            return;
+        }
 
         // Make sure terminal is in canonical mode
         struct termios tio;
@@ -85,6 +90,11 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
         }
 
         FILE *fptr = fopen(consolePath, "r");
+        if (fptr == NULL) {
+            char err = SERVER_CONSOLE_NOT_FOUND_ERROR;
+            ws_sendframe_bin(NULL, &err, 1);
+            return;
+        }
 
         // Create a new render task thread on the stack
         struct render_args* args = malloc(sizeof(struct render_args));
@@ -125,7 +135,7 @@ void onclose(ws_cli_conn_t *client) {
 
 int main() {
     if (getuid() != 0) {
-        printf("Server must be run with [sudo]/administrator privileges.");
+        printf("Server must be run with [sudo]/administrator privileges.\n");
         return 0;
     }
 
@@ -135,7 +145,7 @@ int main() {
     if (fptr == NULL || flength(fptr) != 36) {
         fptr = fopen("authkey.txt", "wb");
 
-        char guid[] = "2147bbf0-617b-4f91-b30a-fce490983a53";
+        char guid[] = "2147bbf0-617b-4f91-b30a-fce490983a53"; // TODO: Generate GUID
         char cwd[256];
         
         getcwd(cwd, sizeof(cwd));
