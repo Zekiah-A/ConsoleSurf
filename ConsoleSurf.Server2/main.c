@@ -7,6 +7,8 @@
 #include "wsServer/include/ws.h"
 #include <fcntl.h>
 #include <string.h>
+#include <linux/types.h>
+#include <linux/kd.h>
 
 #define CLIENT_AUTHENTICATE 0
 #define CLIENT_INPUT 1
@@ -16,7 +18,7 @@
 #define SERVER_CONSOLE 2
 #define SERVER_FULL_ERROR 3
 
-#define MIN(X, Y) ()
+#define RATE_LIMITER_PERIOD 3
 
 char authKey[37];
 pthread_t threads[256];
@@ -24,13 +26,17 @@ int threads_top = 0;
 
 char clientCancellationTokens[256];
 int clientFileDescriptors[256];
-int clients_top;
+int clients_top = 0;
+
+int rateLimiterDates[256];
+char* rateLimiterIps[256];
+int rate_limiter_top = 0;
 
 struct render_args {
     int fileDescriptor;
     int length;
     int frameInterval;
-    char* cancallationToken;
+    char* cancellationToken;
 };
 
 int get_client_index(ws_cli_conn_t* client) {
@@ -46,7 +52,7 @@ int get_client_index(ws_cli_conn_t* client) {
 int* get_client_file_descriptor(ws_cli_conn_t* client) {
     for (int i = 0; i < clients_top; i++) {
         if ((ws_cli_conn_t*) client_socks + i == client) {
-            return &(clientFileDescriptors + i);
+            return (&clientFileDescriptors) + i * 4;
         }
     } 
 }
@@ -65,11 +71,42 @@ void render_loop(void* args) {
 
     // TODO: Perhaps switch while(1) to some bool for this specific client, so that we can
     // cancel the while loop externally (like how a C# cancellation token works)
-    while ((*cancallationToken) == 1) {
+    while ((*r_args->cancellationToken) == 1) {
         read(r_args->fileDescriptor, buffer, (unsigned int) r_args->length);
         ws_sendframe_bin(NULL, buffer, 1);
         sleep(r_args->frameInterval);
     }
+}
+
+int rate_limiter_authorised(char* ip, int extendIfNot) {
+    // If doesn't have address already, add, true
+    int foundIndex = -1;
+    int currentTime = time(NULL);
+
+    for (int i = 0; i < 256; i++) {
+        if (strcmp(ip, *rateLimiterIps[i]) == 0) {
+            foundIndex = i;
+        }
+    }
+
+    if (foundIndex == -1) {
+
+        rateLimiterIps[rate_limiter_top] = ip;
+        rateLimiterDates[rate_limiter_top] = currentTime;
+        rate_limiter_top++;
+        return 1;
+    }
+
+    if (currentTime - rateLimiterDates[foundIndex] < RATE_LIMITER_PERIOD) {
+        if (extendIfNot == 1) {
+            rateLimiterDates[foundIndex] = currentTime;
+        }
+        
+        return false;
+    }
+
+    rateLimiterDates[foundIndex] = currentTime;
+    return true;
 }
 
 int flength(FILE* file) {
@@ -81,7 +118,7 @@ int flength(FILE* file) {
 
 void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, int type) {
     if (msg[0] == (char) CLIENT_AUTHENTICATE) {
-        if (client_render_data_top >= 255) {
+        if (clients_top >= 255) {
             perror("Client overflow error - server can not handle more than 255 concurrently connected clients");
             char err = SERVER_FULL_ERROR;
             ws_sendframe_bin(NULL, &err, 1);
@@ -98,10 +135,10 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
             return;
         }
 
-        int frameInterval = 1000 / (msg[36] < (60) ? msg[36] : 60)
+        int frameInterval = 1000 / (msg[36] < (60) ? msg[36] : 60);
         char* consolePath = malloc(size - 36); // example: 46 - 36 = 10
-        memcpy(msg, consolePath, size - 37); // copy 9
         consolePath[size - 37] = "\0"; //consolePath[9] = "\0"
+        memcpy(msg, consolePath, size - 37); // copy 9
 
         // Read console display into buffer, with read write perms
         int fileDescriptor = open(consolePath, O_RDWR);
@@ -147,7 +184,7 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
         clients_top++;
     }
     else if (msg[0] == (char) CLIENT_INPUT) {
-        int index = get_client_index(client)
+        int index = get_client_index(client);
         if (size != 2 || index == -1) {
             char err = SERVER_AUTHENTICATION_ERROR;
             ws_sendframe_bin(NULL, &err, 1);
@@ -159,7 +196,7 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
 
         ioctl(*tty_fd, KDGKBMODE, &mode);
         if (mode != K_XLATE && mode != K_UNICODE) {          
-            if (ioctl(renderTask.FileHandle, KDSKBMODE, &K_UNICODE) == -1) {
+            if (ioctl(*tty_fd, KDSKBMODE, K_UNICODE) == -1) {
                 printf("Error switching keyboard state");
             }
         }
@@ -179,18 +216,18 @@ void onclose(ws_cli_conn_t *client) {
     *get_client_cancellation_token(client) = 0;
     
     // Splice this client out of the client cancellation token and file descriptor array
-    memove(&clientCancellationTokens + index, &clientCancellationTokens + index - 1, clients_top - index - 1)
-    memove(&clientFileDescriptors + index, &clientFileDescriptors + index - 1, clients_top - index - 1)
+    memmove(&clientCancellationTokens + index, &clientCancellationTokens + index - 1, clients_top - index - 1);
+    memmove(&clientFileDescriptors + index, &clientFileDescriptors + (index * 4) - 4, (clients_top - index - 1) * 4);
     clients_top--;
 }
 
-char* generate_auth_key()
-    char chars[] = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f" };
-    static char buf[37];
+char* generate_auth_key() {
+    static char base16_chars[16] = "0123456789abcdef";
+    char buf[37];
 
     //gen random for all spaces because lazy
-    for(int i = 0; i < 36; i++) {
-        buf[i] = chars[rand() % 16];
+    for (int i = 0; i < 36; i++) {
+        buf[i] = base16_chars[rand() % 16];
     }
 
     buf[8] = "-";
