@@ -27,20 +27,28 @@ struct render_args {
     int frameInterval;
 };
 
-void render_loop(struct render_args* render_args) {
-    char* buffer = malloc(render_args->length);
+void render_loop(void* args) {
+    struct render_args* r_args = (struct render_args*) args;
+    char* buffer = malloc(r_args->length);
 
     // TODO: Perhaps switch while(1) to some bool for this specific client, so that we can
     // cancel the while loop externally (like how a C# cancellation token works)
     while (1) {
-        read(render_args->fileDescriptor, buffer, (unsigned int) render_args->length);
+        read(r_args->fileDescriptor, buffer, (unsigned int) r_args->length);
         ws_sendframe_bin(NULL, buffer, 1);
-        sleep(frameInterval);
+        sleep(r_args->frameInterval);
     }
 }
 
+int flength(FILE* file) {
+    fseek(file, 0, SEEK_END);
+    int size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    return size;
+}
+
 void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, int type) {
-    if (length == 0) {
+    if (size == 0) {
         return;
     }
 
@@ -49,7 +57,7 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
         clientAuthKey[36] = NULL;
         memcpy(msg, clientAuthKey, 36);
 
-        if (length < 44 || strcmp(clientAuthKey, authKey) != 0) {
+        if (size < 44 || strcmp(clientAuthKey, authKey) != 0) {
             char err = SERVER_AUTHENTICATION_ERROR;
             ws_sendframe_bin(NULL, &err, 1);
             return;
@@ -76,24 +84,26 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
             printf("Could not set terminal to canonical mode\n");
         }
 
+        FILE *fptr = fopen(consolePath, "r");
+
         // Create a new render task thread on the stack
         struct render_args* args = malloc(sizeof(struct render_args));
         args->fileDescriptor = fileDescriptor;
-        args->length = flength(consolePath);
+        args->length = flength(fptr);
         args->frameInterval = frameInterval;
 
-        threads[threads_top] = pthread_create(threads + threads_top, NULL, render_loop, args);
+        pthread_create(threads + threads_top, NULL, render_loop, args);
         threads_top++;
 
         // TODO: Add client to a kind of dictionary, with their while condition decider (cancellation token) and file descriptor
     }
     else if (msg[0] == (char) CLIENT_INPUT) {
-        if (length != 2) {
+        if (size != 2) {
             char err = SERVER_AUTHENTICATION_ERROR;
             ws_sendframe_bin(NULL, &err, 1);
             return;
         }
-
+/*
         unsigned int mode = 0;
         ioctl(tty_fd, KDGKBMODE, &mode);
         if (mode != K_XLATE && mode != K_UNICODE) {          
@@ -105,6 +115,7 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
         if (ioctl(tty_fd, TIOCSTI, msg + 1) == -1) {
             printf("Error pushing input char into console");
         }
+*/
     }
 }
 
@@ -112,18 +123,14 @@ void onclose(ws_cli_conn_t *client) {
     // TODO 
 }
 
-
-int flength(FILE* file) {
-    fseek(file, 0, SEEK_END);
-    int size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    return size;
-}
-
 int main() {
-    FILE *fptr;
+    if (getuid() != 0) {
+        printf("Server must be run with [sudo]/administrator privileges.");
+        return 0;
+    }
 
-    fptr = fopen("authkey.txt", "rb+");
+
+    FILE *fptr = fopen("authkey.txt", "rb+");
 
     if (fptr == NULL || flength(fptr) != 36) {
         fptr = fopen("authkey.txt", "wb");
