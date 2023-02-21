@@ -1,3 +1,6 @@
 [submodule "WatsonWebsocketPlus"]
 	path = WatsonWebsocketPlus
 	url = git@github.com:Zekiah-A/WatsonWebsocketPlus.git
+[submodule "ConsoleSurf.Server2/wsServer"]
+	path = ConsoleSurf.Server2/wsServer
+	url = https://github.com/Theldus/wsServer.git

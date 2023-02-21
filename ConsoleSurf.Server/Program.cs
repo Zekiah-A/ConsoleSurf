@@ -150,6 +150,13 @@ unsafe
             // Read console display into buffer, with read write perms
             var handle = open(consolePath, O_RDWR);
             
+            // If desired console does not exist, we tell client what does
+            if (handle == -1)
+            {
+                SendConsoleNotFound(args.Client, availableConsoles);
+                return;
+            }
+
             // Make sure terminal is in canonical mode
             void* unmanagedTermios;
             if (tcgetattr(handle, &unmanagedTermios) < 0) {
@@ -162,13 +169,6 @@ unsafe
             Marshal.StructureToPtr(tio, new IntPtr(unmanagedTermios), false);
             if (tcsetattr(handle, TCSANOW, &unmanagedTermios) < 0) {
                 Console.WriteLine("Could not set terminal to canonical mode");
-            }
-            
-            // If desired console does not exist, we tell client what does
-            if (handle == -1)
-            {
-                SendConsoleNotFound(args.Client, availableConsoles);
-                return;
             }
             
             var length = flength(consolePath);
