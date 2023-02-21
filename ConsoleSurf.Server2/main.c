@@ -9,6 +9,12 @@
 #include <string.h>
 #include <linux/types.h>
 #include <linux/kd.h>
+#include <time.h>
+#include <unistd.h>
+#include <pthread.h>
+
+#undef MAX_CLIENTS
+#define MAX_CLIENTS 256
 
 #define CLIENT_AUTHENTICATE 0
 #define CLIENT_INPUT 1
@@ -52,7 +58,7 @@ int get_client_index(ws_cli_conn_t* client) {
 int* get_client_file_descriptor(ws_cli_conn_t* client) {
     for (int i = 0; i < clients_top; i++) {
         if ((ws_cli_conn_t*) client_socks + i == client) {
-            return (&clientFileDescriptors) + i * 4;
+            return &clientFileDescriptors[i];
         }
     } 
 }
@@ -60,31 +66,30 @@ int* get_client_file_descriptor(ws_cli_conn_t* client) {
 char* get_client_cancellation_token(ws_cli_conn_t* client) {
     for (int i = 0; i < clients_top; i++) {
         if ((ws_cli_conn_t*) client_socks + i == client) {
-            return (&clientCancellationTokens) + i;
+            return &clientCancellationTokens[i];
         }
     } 
 }
 
-void render_loop(void* args) {
+void* render_loop(void* args) {
     struct render_args* r_args = (struct render_args*) args;
     char* buffer = malloc(r_args->length);
 
-    // TODO: Perhaps switch while(1) to some bool for this specific client, so that we can
-    // cancel the while loop externally (like how a C# cancellation token works)
     while ((*r_args->cancellationToken) == 1) {
         read(r_args->fileDescriptor, buffer, (unsigned int) r_args->length);
         ws_sendframe_bin(NULL, buffer, 1);
         sleep(r_args->frameInterval);
     }
+
+    return NULL;
 }
 
 int rate_limiter_authorised(char* ip, int extendIfNot) {
-    // If doesn't have address already, add, true
     int foundIndex = -1;
     int currentTime = time(NULL);
 
     for (int i = 0; i < 256; i++) {
-        if (strcmp(ip, *rateLimiterIps[i]) == 0) {
+        if (rateLimiterIps[i] != NULL && strcmp(ip, rateLimiterIps[i]) == 0) {
             foundIndex = i;
         }
     }
@@ -102,11 +107,11 @@ int rate_limiter_authorised(char* ip, int extendIfNot) {
             rateLimiterDates[foundIndex] = currentTime;
         }
         
-        return false;
+        return 0;
     }
 
     rateLimiterDates[foundIndex] = currentTime;
-    return true;
+    return 1;
 }
 
 int flength(FILE* file) {
@@ -126,8 +131,8 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
         }
 
         char* clientAuthKey = malloc(37);
-        clientAuthKey[36] = "\0";
-        memcpy(msg, clientAuthKey, 36);
+        clientAuthKey[36] = '\0';
+        memcpy((void*) msg, clientAuthKey, 36);
 
         if (size < 44 || strcmp(clientAuthKey, authKey) != 0) {
             char err = SERVER_AUTHENTICATION_ERROR;
@@ -137,8 +142,8 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
 
         int frameInterval = 1000 / (msg[36] < (60) ? msg[36] : 60);
         char* consolePath = malloc(size - 36); // example: 46 - 36 = 10
-        consolePath[size - 37] = "\0"; //consolePath[9] = "\0"
-        memcpy(msg, consolePath, size - 37); // copy 9
+        consolePath[size - 37] = '\0'; //consolePath[9] = '\0'
+        memcpy((void*) msg, consolePath, size - 37); // copy 9
 
         // Read console display into buffer, with read write perms
         int fileDescriptor = open(consolePath, O_RDWR);
@@ -172,13 +177,11 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
         args->fileDescriptor = fileDescriptor;
         args->length = flength(fptr);
         args->frameInterval = frameInterval;
-        args->cancellationToken = &clientCancellationTokens + clients_top;
+        args->cancellationToken = &clientCancellationTokens[clients_top];
 
         pthread_create(threads + threads_top, NULL, render_loop, args);
         threads_top++;
 
-        // TODO: Add client to a kind of dictionary, with their while condition decider (cancellation token) and file descriptor
-        // Setup cancellation token.
         clientCancellationTokens[clients_top] = 1;
         clientFileDescriptors[clients_top] = fileDescriptor;
         clients_top++;
@@ -223,18 +226,18 @@ void onclose(ws_cli_conn_t *client) {
 
 char* generate_auth_key() {
     static char base16_chars[16] = "0123456789abcdef";
-    char buf[37];
+    static char buf[37];
 
     //gen random for all spaces because lazy
     for (int i = 0; i < 36; i++) {
         buf[i] = base16_chars[rand() % 16];
     }
 
-    buf[8] = "-";
-    buf[13] = "-";
-    buf[18] = "-";
-    buf[23] = "-";
-    buf[36] = "\0";
+    buf[8] = '-';
+    buf[13] = '-';
+    buf[18] = '-';
+    buf[23] = '-';
+    buf[36] = '\0';
     return buf;
 }
 
@@ -257,7 +260,7 @@ int main() {
     }
 
     fread(authKey, 1, 36, fptr);
-    authKey[36] = "\0";
+    authKey[36] = '\0';
 
 	struct ws_events evs;
 	evs.onclose = &onclose;
