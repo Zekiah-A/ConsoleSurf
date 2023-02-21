@@ -18,22 +18,38 @@
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 
 char authKey[37];
+pthread_t threads[256];
+int threads_top = 0;
 
-void onclose(ws_cli_conn_t *client)
-{
-	char *cli;
-	cli = ws_getaddress(client);
-	printf("Client %s", cli, " disconnected from the server\n");
+struct render_args {
+    int fileDescriptor;
+    int length;
+    int frameInterval;
+};
+
+void render_loop(struct render_args* render_args) {
+    char* buffer = malloc(render_args->length);
+
+    // TODO: Perhaps switch while(1) to some bool for this specific client, so that we can
+    // cancel the while loop externally (like how a C# cancellation token works)
+    while (1) {
+        read(render_args->fileDescriptor, buffer, (unsigned int) render_args->length);
+        ws_sendframe_bin(NULL, buffer, 1);
+        sleep(frameInterval);
+    }
 }
 
-void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, int type)
-{
+void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, int type) {
+    if (length == 0) {
+        return;
+    }
+
     if (msg[0] == (char) CLIENT_AUTHENTICATE) {
         char* clientAuthKey = malloc(37);
         clientAuthKey[36] = NULL;
         memcpy(msg, clientAuthKey, 36);
 
-        if (sizeof(msg < 44) || strcmp(clientAuthKey, authKey) != 0) {
+        if (length < 44 || strcmp(clientAuthKey, authKey) != 0) {
             char err = SERVER_AUTHENTICATION_ERROR;
             ws_sendframe_bin(NULL, &err, 1);
             return;
@@ -60,27 +76,51 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
             printf("Could not set terminal to canonical mode\n");
         }
 
-        int length = flength(consolePath);
-        int buffer = malloc(length);
+        // Create a new render task thread on the stack
+        struct render_args* args = malloc(sizeof(struct render_args));
+        args->fileDescriptor = fileDescriptor;
+        args->length = flength(consolePath);
+        args->frameInterval = frameInterval;
 
+        threads[threads_top] = pthread_create(threads + threads_top, NULL, render_loop, args);
+        threads_top++;
+
+        // TODO: Add client to a kind of dictionary, with their while condition decider (cancellation token) and file descriptor
     }
     else if (msg[0] == (char) CLIENT_INPUT) {
-        
-        //char c = 'a';
-        //ioctl(tty_fd, TIOCSTI, &c);
+        if (length != 2) {
+            char err = SERVER_AUTHENTICATION_ERROR;
+            ws_sendframe_bin(NULL, &err, 1);
+            return;
+        }
+
+        unsigned int mode = 0;
+        ioctl(tty_fd, KDGKBMODE, &mode);
+        if (mode != K_XLATE && mode != K_UNICODE) {          
+            if (ioctl(renderTask.FileHandle, KDSKBMODE, &K_UNICODE) == -1) {
+                printf("Error switching keyboard state");
+            }
+        }
+
+        if (ioctl(tty_fd, TIOCSTI, msg + 1) == -1) {
+            printf("Error pushing input char into console");
+        }
     }
 }
 
-int flength(FILE* file)
-{
+void onclose(ws_cli_conn_t *client) {
+    // TODO 
+}
+
+
+int flength(FILE* file) {
     fseek(file, 0, SEEK_END);
     int size = ftell(file);
     fseek(file, 0, SEEK_SET);
     return size;
 }
 
-int main()
-{
+int main() {
     FILE *fptr;
 
     fptr = fopen("authkey.txt", "rb+");
@@ -107,48 +147,3 @@ int main()
     
 	return 0;
 }
-
-/*
-#include <stdio.h>
-#include <stdlib.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <termios.h>
-#include <sys/ioctl.h>
-
-int main()
-{
-    int tty_fd = open("/dev/tty", O_RDWR);
-    if (tty_fd < 0) {
-        perror("open");
-        exit(1);
-    }
-
-    struct termios tio;
-    if (tcgetattr(tty_fd, &tio) < 0) {
-        perror("tcgetattr");
-        exit(1);
-    }
-
-    printf("%d %d\n", ICANON, TCSANOW);
-
-    // Set terminal to canonical mode
-    tio.c_lflag |= ICANON;
-    if (tcsetattr(tty_fd, TCSANOW, &tio) < 0) {
-        perror("tcsetattr");
-        exit(1);
-    }
-
-    // Send a character to the terminal
-    char c = 'a';
-    if (ioctl(tty_fd, TIOCSTI, &c) < 0) {
-        perror("ioctl");
-        exit(1);
-    }
-
-    close(tty_fd);
-
-    return 0;
-}
-
-*/
