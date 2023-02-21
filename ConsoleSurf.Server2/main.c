@@ -16,7 +16,7 @@
 #define SERVER_CONSOLE 2
 #define SERVER_FULL_ERROR 3
 
-#define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
+#define MIN(X, Y) ()
 
 char authKey[37];
 pthread_t threads[256];
@@ -33,18 +33,28 @@ struct render_args {
     char* cancallationToken;
 };
 
-int get_client_file_descriptor(ws_cli_conn_t* client) {
+int get_client_index(ws_cli_conn_t* client) {
     for (int i = 0; i < clients_top; i++) {
-        if (&client_socks[i] == client) {
-            return clientFileDescriptors[i];
+        if ((ws_cli_conn_t*) client_socks + i == client) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+int* get_client_file_descriptor(ws_cli_conn_t* client) {
+    for (int i = 0; i < clients_top; i++) {
+        if ((ws_cli_conn_t*) client_socks + i == client) {
+            return &(clientFileDescriptors + i);
         }
     } 
 }
 
-int get_client_cancellation_token(ws_cli_conn_t* client) {
+char* get_client_cancellation_token(ws_cli_conn_t* client) {
     for (int i = 0; i < clients_top; i++) {
-        if (&client_socks[i] == client) {
-            return clientCancellationTokens[i];
+        if ((ws_cli_conn_t*) client_socks + i == client) {
+            return (&clientCancellationTokens) + i;
         }
     } 
 }
@@ -88,7 +98,7 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
             return;
         }
 
-        int frameInterval = 1000 / MIN(msg[36], 60);
+        int frameInterval = 1000 / (msg[36] < (60) ? msg[36] : 60)
         char* consolePath = malloc(size - 36); // example: 46 - 36 = 10
         memcpy(msg, consolePath, size - 37); // copy 9
         consolePath[size - 37] = "\0"; //consolePath[9] = "\0"
@@ -137,33 +147,45 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
         clients_top++;
     }
     else if (msg[0] == (char) CLIENT_INPUT) {
-        if (size != 2) {
+        int index = get_client_index(client)
+        if (size != 2 || index == -1) {
             char err = SERVER_AUTHENTICATION_ERROR;
             ws_sendframe_bin(NULL, &err, 1);
             return;
         }
-/*
+
+        int* tty_fd = get_client_file_descriptor(client);
         unsigned int mode = 0;
-        ioctl(tty_fd, KDGKBMODE, &mode);
+
+        ioctl(*tty_fd, KDGKBMODE, &mode);
         if (mode != K_XLATE && mode != K_UNICODE) {          
             if (ioctl(renderTask.FileHandle, KDSKBMODE, &K_UNICODE) == -1) {
                 printf("Error switching keyboard state");
             }
         }
 
-        if (ioctl(tty_fd, TIOCSTI, msg + 1) == -1) {
+        if (ioctl(*tty_fd, TIOCSTI, msg + 1) == -1) {
             printf("Error pushing input char into console");
         }
-*/
     }
 }
 
 void onclose(ws_cli_conn_t *client) {
-    // TODO
+    int index = get_client_index(client);
+    if (index == -1) {
+        return;
+    }
+
+    *get_client_cancellation_token(client) = 0;
+    
+    // Splice this client out of the client cancellation token and file descriptor array
+    memove(&clientCancellationTokens + index, &clientCancellationTokens + index - 1, clients_top - index - 1)
+    memove(&clientFileDescriptors + index, &clientFileDescriptors + index - 1, clients_top - index - 1)
+    clients_top--;
 }
 
 char* generate_auth_key()
-    char chars[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
+    char chars[] = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f" };
     static char buf[37];
 
     //gen random for all spaces because lazy
