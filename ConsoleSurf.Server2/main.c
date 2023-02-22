@@ -12,6 +12,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <arpa/inet.h>
 
 #undef MAX_CLIENTS
 #define MAX_CLIENTS 256
@@ -292,7 +293,7 @@ int main() {
         fwrite(generate_auth_key(), 1, 36, fptr);
         printf("Created auth key file! A secure, randomly generated UUID has been placed into this file for use of client "
             "authentication. You may replace this key with your own (must be of length 36) by modifying the file ");
-        printf("'%s'.\n", cwd)
+        printf("'%s'/authkey.txt.\n", cwd);
     }
 
     fread(authKey, 1, 36, fptr);
