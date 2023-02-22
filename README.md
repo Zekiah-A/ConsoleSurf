@@ -1,14 +1,14 @@
 # ConsoleSurf
 A conspy inspired utility, based off websocket, for streaming a virtual console to a browser-based viewer. See the original at https://conspy.sourceforge.net/.
 
-Server can be found at `ConsoleSurf.Server`. Use the simple web viewer (`index.html`), or hosted on this repository's github pages in any browser to access the virtual consoles of the device running the servers.
+Server can be found at `ConsoleSurf.Server2`. Use the simple web viewer (`index.html`), or hosted on this repository's github pages in any browser to access the virtual consoles of the device running the servers.
 
 Servers are kept safe with an 128-bit authentication key. While being relitavely secure, make sure to never expose these keyts, as they may grant attackers full acess to the system which the server software is run on.
 
 The server software has been intended to work with linux servers only. Any functionality on BSD/OSX is untested and must be done at your own risk!
 
 ## Building:
-The latest server software (WIP) can be found within ConsoleSurf.Server2. to build this repo from source, run the following:
+To build this repo from source with the latest server, run the following:
 ```sh
     # Clone the repository recursively so we include all submodules
     > git clone --recursive https://github.com/Zekiah-A/ConsoleSurf 
