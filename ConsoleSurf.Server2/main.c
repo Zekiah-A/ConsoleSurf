@@ -45,9 +45,35 @@ struct render_args {
     char* cancellationToken;
 };
 
+struct ws_connection {
+    int client_sock; /**< Client socket FD.        */
+    int state;       /**< WebSocket current state. */
+
+    /* Timeout thread and locks. */
+    pthread_mutex_t mtx_state;
+    pthread_cond_t cnd_state_close;
+    pthread_t thrd_tout;
+    bool close_thrd;
+
+    /* Send lock. */
+    pthread_mutex_t mtx_snd;
+
+    /* IP address. */
+    char ip[INET6_ADDRSTRLEN];
+
+    /* Ping/Pong IDs and locks. */
+    int32_t last_pong_id;
+    int32_t current_ping_id;
+    pthread_mutex_t mtx_ping;
+};
+ws_cli_conn_t* _client_socks_location;
+int firstConnection = 1;
+
+// We are doing an address comparison between the mem address of this specific client, and the memory address
+//  of the containing client socks array client (_client_socks_location + i). Easier than struct comparison.
 int get_client_index(ws_cli_conn_t* client) {
     for (int i = 0; i < clients_top; i++) {
-        if ((ws_cli_conn_t*) client_socks + i == client) {
+        if (_client_socks_location + i == client) {
             return i;
         }
     }
@@ -57,7 +83,7 @@ int get_client_index(ws_cli_conn_t* client) {
 
 int* get_client_file_descriptor(ws_cli_conn_t* client) {
     for (int i = 0; i < clients_top; i++) {
-        if ((ws_cli_conn_t*) client_socks + i == client) {
+        if (_client_socks_location + i == client) {
             return &clientFileDescriptors[i];
         }
     } 
@@ -65,7 +91,7 @@ int* get_client_file_descriptor(ws_cli_conn_t* client) {
 
 char* get_client_cancellation_token(ws_cli_conn_t* client) {
     for (int i = 0; i < clients_top; i++) {
-        if ((ws_cli_conn_t*) client_socks + i == client) {
+        if (_client_socks_location + i == client) {
             return &clientCancellationTokens[i];
         }
     } 
@@ -119,6 +145,15 @@ int flength(FILE* file) {
     int size = ftell(file);
     fseek(file, 0, SEEK_SET);
     return size;
+}
+
+// HACK: Since we are unable to acess the array of connected clients in wsserver, instead we capture the
+// address of the first client that connects, to get the array address (as clients originate from that array)
+void onopen(ws_cli_conn_t *client) {
+    if (firstConnection == 1) {
+        _client_socks_location = client;
+        firstConnection = 0;
+    }
 }
 
 void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, int type) {
@@ -255,14 +290,16 @@ int main() {
         char cwd[256];
         getcwd(cwd, sizeof(cwd));
         fwrite(generate_auth_key(), 1, 36, fptr);
-        printf("Created auth key file! A secure, randomly generated UUID has been placed into this file for use of client %s",
-            "authentication. You may replace this key with your own (must be of length 36) by modifying the file '%s'.\n", cwd);
+        printf("Created auth key file! A secure, randomly generated UUID has been placed into this file for use of client "
+            "authentication. You may replace this key with your own (must be of length 36) by modifying the file ");
+        printf("'%s'.\n", cwd)
     }
 
     fread(authKey, 1, 36, fptr);
     authKey[36] = '\0';
 
 	struct ws_events evs;
+    evs.onopen = &onopen;
 	evs.onclose = &onclose;
 	evs.onmessage = &onmessage;
 	ws_socket(&evs, 8080, 0, 1000);
