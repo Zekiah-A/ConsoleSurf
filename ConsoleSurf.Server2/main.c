@@ -220,7 +220,7 @@ void onclose(ws_cli_conn_t *client) {
     
     // Splice this client out of the client cancellation token and file descriptor array
     memmove(&clientCancellationTokens + index, &clientCancellationTokens + index - 1, clients_top - index - 1);
-    memmove(&clientFileDescriptors + index, &clientFileDescriptors + (index * 4) - 4, (clients_top - index - 1) * 4);
+    memmove(&clientFileDescriptors + index * 4, &clientFileDescriptors + index * 4 - 4, clients_top - (index * 4) - 4);
     clients_top--;
 }
 
