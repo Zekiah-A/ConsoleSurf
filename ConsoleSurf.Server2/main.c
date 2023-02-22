@@ -291,9 +291,10 @@ int main() {
         char cwd[256];
         getcwd(cwd, sizeof(cwd));
         fwrite(generate_auth_key(), 1, 36, fptr);
-        printf("Created auth key file! A secure, randomly generated UUID has been placed into this file for use of client "
-            "authentication. You may replace this key with your own (must be of length 36) by modifying the file ");
-        printf("'%s'/authkey.txt.\n", cwd);
+        printf("Created auth key file! A secure, randomly generated UUID has"
+               "been placed into this file for use of client authentication. You may"
+               "replace this key with your own (must be of length 36) by modifying the file ");
+        printf("'%s/authkey.txt'min.\n", cwd);
     }
 
     fread(authKey, 1, 36, fptr);
