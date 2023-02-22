@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <arpa/inet.h>
+#include <dirent.h>
 
 #undef MAX_CLIENTS
 #define MAX_CLIENTS 256
@@ -165,10 +166,10 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
             ws_sendframe_bin(NULL, &err, 1);
             return;
         }
-
+        
         char* clientAuthKey = malloc(37);
+        memcpy(clientAuthKey, msg + 1, 36);
         clientAuthKey[36] = '\0';
-        memcpy((void*) msg, clientAuthKey, 36);
 
         if (size < 44 || strcmp(clientAuthKey, authKey) != 0) {
             char err = SERVER_AUTHENTICATION_ERROR;
@@ -176,16 +177,38 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
             return;
         }
 
-        int frameInterval = 1000 / (msg[36] < (60) ? msg[36] : 60);
+        int frameInterval = 1000 / (msg[37] < (60) ? msg[37] : 60);
         char* consolePath = malloc(size - 36); // example: 46 - 36 = 10
         consolePath[size - 37] = '\0'; //consolePath[9] = '\0'
-        memcpy((void*) msg, consolePath, size - 37); // copy 9
+        memcpy(consolePath, msg + 37, size - 37); // copy 9
 
         // Read console display into buffer, with read write perms
         int fileDescriptor = open(consolePath, O_RDWR);
         if (fileDescriptor == -1) {
-            char err = SERVER_CONSOLE_NOT_FOUND_ERROR;
-            ws_sendframe_bin(NULL, &err, 1);
+            char* err;
+            DIR* dir = dir = opendir("/dev/");
+            struct dirent* entry;
+            int length = 1;
+            err[0] = (char) SERVER_CONSOLE_NOT_FOUND_ERROR;
+
+            while ((entry = readdir(dir)) != NULL) {
+                if ((entry->d_name[0] != 'v' && entry->d_name[1] != 'c') ||
+                    (entry->d_name[0] != 't' && entry->d_name[1] != 't' && entry->d_name[2] == 'y')) {
+                    continue;
+                }
+
+                int name_len = strlen(entry->d_name);
+                memcpy(err + length, " /dev/", 6);
+                memcpy(err + length + 6, &(entry->d_name), name_len);
+                length += name_len + 6;
+            }
+
+            for (int i = 0; i < length; i++) {
+                printf("%c", err[i]);
+            }
+
+            ws_sendframe_bin(NULL, err, length);
+            closedir(dir);
             return;
         }
 

@@ -12,8 +12,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>
+cmake_minimum_required(VERSION 3.25)
 
-project(scribbleserver C)
+project(main C)
 
 add_executable(main main.c)
 add_subdirectory(wsServer)
