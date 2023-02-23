@@ -103,12 +103,13 @@ void* render_loop(void* args) {
     struct render_args* r_args = (struct render_args*) args;
     char* buffer = malloc(r_args->length);
 
-    while ((*r_args->cancellationToken) == 1) {
+    while (*(r_args->cancellationToken) == 1) {
         read(r_args->fileDescriptor, buffer, (unsigned int) r_args->length);
-        ws_sendframe_bin(NULL, buffer, 1);
+        ws_sendframe_bin(NULL, buffer, r_args->length);
         sleep(r_args->frameInterval);
     }
 
+    free(buffer);
     return NULL;
 }
 
@@ -167,7 +168,7 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
             return;
         }
         
-        char* clientAuthKey = malloc(37);
+        char clientAuthKey[37];
         memcpy(clientAuthKey, msg + 1, 36);
         clientAuthKey[36] = '\0';
 
@@ -177,7 +178,7 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
             return;
         }
 
-        int frameInterval = 1000 / (msg[37] < (60) ? msg[37] : 60);
+        int frameInterval = 1 / (msg[37] < (60) ? msg[37] : 60);
         char* consolePath = malloc(size - 36); // example: 46 - 36 = 10
         consolePath[size - 37] = '\0'; //consolePath[9] = '\0'
         memcpy(consolePath, msg + 37, size - 37); // copy 9
@@ -230,6 +231,8 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
             ws_sendframe_bin(NULL, &err, 1);
             return;
         }
+
+        free(consolePath);
 
         // Create a new render task thread on the stack
         struct render_args* args = malloc(sizeof(struct render_args));
