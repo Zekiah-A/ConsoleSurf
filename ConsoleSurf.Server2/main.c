@@ -183,9 +183,17 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
         consolePath[size - 37] = '\0'; //consolePath[9] = '\0'
         memcpy(consolePath, msg + 37, size - 37); // copy 9
 
+        printf("hardcoded string: /dev/vcsa2 | input path: %s\n", consolePath);
+        printf("%d\n", strlen(consolePath));
+        printf("%d\n", strlen("/dev/vcsa2"));
+
+        int is_match = strcmp("/dev/vcsa2", consolePath);
+        printf("Matches: %s\n", (is_match == 0 ? "Yes" : "No"));
+
         // Read console display into buffer, with read write perms
         int fileDescriptor = open(consolePath, O_RDWR);
         if (fileDescriptor == -1) {
+            puts("Does not work");
             char* err;
             DIR* dir = dir = opendir("/dev/");
             struct dirent* entry;
@@ -193,8 +201,7 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
             err[0] = (char) SERVER_CONSOLE_NOT_FOUND_ERROR;
 
             while ((entry = readdir(dir)) != NULL) {
-                if ((entry->d_name[0] != 'v' && entry->d_name[1] != 'c') ||
-                    (entry->d_name[0] != 't' && entry->d_name[1] != 't' && entry->d_name[2] == 'y')) {
+                if (strncmp("vc", entry->d_name, 2) != 0 && strncmp("tty", entry->d_name, 3) != 0) {
                     continue;
                 }
 
@@ -202,10 +209,6 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
                 memcpy(err + length, " /dev/", 6);
                 memcpy(err + length + 6, &(entry->d_name), name_len);
                 length += name_len + 6;
-            }
-
-            for (int i = 0; i < length; i++) {
-                printf("%c", err[i]);
             }
 
             ws_sendframe_bin(NULL, err, length);
@@ -279,7 +282,6 @@ void onclose(ws_cli_conn_t *client) {
     }
 
     *get_client_cancellation_token(client) = 0;
-    
     // Splice this client out of the client cancellation token and file descriptor array
     memmove(&clientCancellationTokens + index, &clientCancellationTokens + index - 1, clients_top - index - 1);
     memmove(&clientFileDescriptors + index * 4, &clientFileDescriptors + index * 4 - 4, clients_top - (index * 4) - 4);

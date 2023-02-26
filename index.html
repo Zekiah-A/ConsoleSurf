@@ -38,6 +38,25 @@
             <input id="framerateInput" type="number" min="1" max="60" placeholder="Stream framerate">
             <button onclick="connect()">Connect to server</button>
         </div>
+
+        <div class="modal">
+            <input id="errorModal" type="checkbox"/>
+            <label for="errorModal" class="overlay"></label>
+            <article>
+                <header>
+                    <h3>Error</h3>
+                    <label for="error_modal" class="close">&times;</label>
+                </header>
+                <section class="content" id="errorModalContent">
+                    <!--Modal content will be placed here-->
+                </section>
+                <footer>
+                    <label for="error_modal" class="button dangerous" id="errorModalDissmiss">
+                        Go back to home and try again
+                    </label>
+                </footer>
+            </article>
+        </div>
     </body>
     <script>
         let ws = null
@@ -51,6 +70,16 @@
         let currentX = 0
         let currentY = 0
         let frame = 0
+
+        let modal = (text) =>
+            new Promise((resolve, reject) => {
+                errorModal.setAttribute("checked", true)
+                errorModalContent.innerText = text
+                errorModalDissmiss.addEventListener("click", () => {
+                    errorModal.removeAttribute("checked")
+                    resolve()
+                })
+            })
 
         const serverPacket = {
             AuthenticationError: 0,
@@ -174,13 +203,13 @@
                 data = new DataView(await data.arrayBuffer())
 
                 if (data.getUint8(0) == serverPacket.AuthenticationError) {
-                    alert("Could not authenticate with provided key.. try again")
-                    location.reload()
+                    modal("Could not authenticate with provided key.. try again")
+                        .then(() => location.reload())
                 }
                 else if (data.getUint8(0) == serverPacket.ConsoleNotFoundError) {
-                    alert("Could not locate desired virtual console, valid consoles include: "
+                    modal("Could not locate desired virtual console, valid consoles include: "
                         + decoder.decode(data.buffer.slice(1)))
-                    location.reload()
+                        .then(() => location.reload())
                     return
                 }
 
@@ -213,12 +242,13 @@
             }
 
             ws.onclose = () => {
-                alert("Console connection closed unexpectedly")
-                location.reload()
+                modal("Console connection closed unexpectedly")
+                    .then(() => location.reload())
             }
 
             ws.onerror = (error) => {
-                console.error(error)
+                modal("Console connection experienced error: " + error.toString())
+                    .then(() => location.reload())
             }
         }
 
