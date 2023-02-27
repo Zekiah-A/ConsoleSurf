@@ -43,8 +43,9 @@ int rate_limiter_top = 0;
 struct render_args {
     int fileDescriptor;
     int length;
-    int frameInterval;
+    long frameInterval;
     char* cancellationToken;
+    ws_cli_conn_t* client;
 };
 
 struct ws_connection {
@@ -101,12 +102,17 @@ char* get_client_cancellation_token(ws_cli_conn_t* client) {
 
 void* render_loop(void* args) {
     struct render_args* r_args = (struct render_args*) args;
-    char* buffer = malloc(r_args->length);
+    struct timespec sleepTime;
+    sleepTime.tv_sec = 0;
+    sleepTime.tv_nsec = r_args->frameInterval;
+
+    char* buffer = malloc(r_args->length + 1);
+    buffer[0] = SERVER_CONSOLE;
 
     while (*(r_args->cancellationToken) == 1) {
-        read(r_args->fileDescriptor, buffer, (unsigned int) r_args->length);
-        ws_sendframe_bin(NULL, buffer, r_args->length);
-        sleep(r_args->frameInterval);
+        read(r_args->fileDescriptor, buffer + 1, (unsigned int) r_args->length);
+        ws_sendframe_bin(r_args->client, buffer, r_args->length);
+        nanosleep(&sleepTime, NULL);
     }
 
     free(buffer);
@@ -162,9 +168,9 @@ void onopen(ws_cli_conn_t *client) {
 void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, int type) {
     if (msg[0] == (char) CLIENT_AUTHENTICATE) {
         if (clients_top >= 255) {
-            perror("Client overflow error - server can not handle more than 255 concurrently connected clients");
+            printf("Client overflow error - server can not handle more than 256 concurrently connected clients\n");
             char err = SERVER_FULL_ERROR;
-            ws_sendframe_bin(NULL, &err, 1);
+            ws_sendframe_bin(client, &err, 1);
             return;
         }
         
@@ -174,31 +180,35 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
 
         if (size < 44 || strcmp(clientAuthKey, authKey) != 0) {
             char err = SERVER_AUTHENTICATION_ERROR;
-            ws_sendframe_bin(NULL, &err, 1);
+            ws_sendframe_bin(client, &err, 1);
             return;
         }
 
-        int frameInterval = 1 / (msg[37] < (60) ? msg[37] : 60);
+        long frameInterval = 1000000000L / (msg[37] < 1 ? 1 : (msg[37] < (60) ? msg[37] : 60));
         char* consolePath = malloc(size - 36); // example: 46 - 36 = 10
         consolePath[size - 37] = '\0'; //consolePath[9] = '\0'
-        memcpy(consolePath, msg + 37, size - 37); // copy 9
-
-        printf("hardcoded string: /dev/vcsa2 | input path: %s\n", consolePath);
-        printf("%d\n", strlen(consolePath));
-        printf("%d\n", strlen("/dev/vcsa2"));
-
-        int is_match = strcmp("/dev/vcsa2", consolePath);
-        printf("Matches: %s\n", (is_match == 0 ? "Yes" : "No"));
+        memcpy(consolePath, msg + 38, size - 37); // copy 9
 
         // Read console display into buffer, with read write perms
         int fileDescriptor = open(consolePath, O_RDWR);
-        if (fileDescriptor == -1) {
-            puts("Does not work");
-            char* err;
-            DIR* dir = dir = opendir("/dev/");
+        FILE *fptr = fopen(consolePath, "r");
+        if (fileDescriptor == -1 || fptr == NULL) {
+            DIR* dir = opendir("/dev/");
             struct dirent* entry;
-            int length = 1;
+            int dir_length = 0;
+            int dir_count = 0;
+            while ((entry = readdir(dir)) != NULL) {
+                if (strncmp("vc", entry->d_name, 2) != 0 && strncmp("tty", entry->d_name, 3) != 0) {
+                    continue;
+                }
+
+                dir_count++;
+                dir_length += strlen(entry->d_name);
+            }
+
+            char* err = malloc(dir_length + (dir_count * 6) + 1);
             err[0] = (char) SERVER_CONSOLE_NOT_FOUND_ERROR;
+            int err_length = 1;
 
             while ((entry = readdir(dir)) != NULL) {
                 if (strncmp("vc", entry->d_name, 2) != 0 && strncmp("tty", entry->d_name, 3) != 0) {
@@ -206,43 +216,41 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
                 }
 
                 int name_len = strlen(entry->d_name);
-                memcpy(err + length, " /dev/", 6);
-                memcpy(err + length + 6, &(entry->d_name), name_len);
-                length += name_len + 6;
+                memcpy(err + err_length, " /dev/", 6);
+                memcpy(err + err_length + 6, &(entry->d_name), name_len);
+                err_length += name_len + 6;
             }
 
-            ws_sendframe_bin(NULL, err, length);
+            for (int i = 0; i < err_length; i++) {
+                printf("%c", err[i]);
+            }
+
+            ws_sendframe_bin(client, err, err_length);
             closedir(dir);
             return;
         }
 
-        // Make sure terminal is in canonical mode
-        struct termios tio;
-        if (tcgetattr(fileDescriptor, &tio) == -1) {
-            printf("Terminal is not in canonical mode, switching\n");
+        if (strncmp("/dev/tty", consolePath, 8) == 0) {
+            // Make sure terminal is in canonical mode
+            struct termios tio;
+            if (tcgetattr(fileDescriptor, &tio) == -1) {
+                perror("TTY is not in canonical mode, switching");
+            }
+
+            tio.c_iflag |= ICANON;
+
+            if (tcsetattr(fileDescriptor, TCSANOW, &tio) == -1) {
+                perror("TTY not set terminal to canonical mode");
+            }
         }
-
-        tio.c_iflag |= ICANON;
-
-        if (tcsetattr(fileDescriptor, TCSANOW, &tio) == -1) {
-            printf("Could not set terminal to canonical mode\n");
-        }
-
-        FILE *fptr = fopen(consolePath, "r");
-        if (fptr == NULL) {
-            char err = SERVER_CONSOLE_NOT_FOUND_ERROR;
-            ws_sendframe_bin(NULL, &err, 1);
-            return;
-        }
-
-        free(consolePath);
-
+        
         // Create a new render task thread on the stack
         struct render_args* args = malloc(sizeof(struct render_args));
         args->fileDescriptor = fileDescriptor;
         args->length = flength(fptr);
         args->frameInterval = frameInterval;
         args->cancellationToken = &clientCancellationTokens[clients_top];
+        args->client = client;
 
         pthread_create(threads + threads_top, NULL, render_loop, args);
         threads_top++;
@@ -255,7 +263,7 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
         int index = get_client_index(client);
         if (size != 2 || index == -1) {
             char err = SERVER_AUTHENTICATION_ERROR;
-            ws_sendframe_bin(NULL, &err, 1);
+            ws_sendframe_bin(client, &err, 1);
             return;
         }
 
@@ -265,12 +273,12 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
         ioctl(*tty_fd, KDGKBMODE, &mode);
         if (mode != K_XLATE && mode != K_UNICODE) {          
             if (ioctl(*tty_fd, KDSKBMODE, K_UNICODE) == -1) {
-                printf("Error switching keyboard state");
+                perror("Error switching keyboard state");
             }
         }
-
+        
         if (ioctl(*tty_fd, TIOCSTI, msg + 1) == -1) {
-            printf("Error pushing input char into console");
+            perror("Error pushing input char into console");
         }
     }
 }

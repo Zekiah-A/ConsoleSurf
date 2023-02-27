@@ -5,6 +5,14 @@
         <title>ConsoleSurf Viewer</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/picnic">
+        <style>
+            [data-tooltip]::after {
+                white-space: normal !important;
+            }
+            [data-tooltip]::after {
+                width: 296px !important;
+            }
+        </style>
     </head>
     <body style="overflow: hidden;">
         <div id="content" style="display: none;">
@@ -27,14 +35,17 @@
             </div>
         </div>
 
-        <div id="loginPrompt" class="card" style="display: flex; flex-direction: column; row-gap: 4px;position: absolute; padding: 8px; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(400px, calc(100% - 16px));">
+        <div id="loginPrompt" class="card" style="overflow: visible; display: flex; flex-direction: column; row-gap: 4px;position: absolute; padding: 8px; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(400px, calc(100% - 16px));">
             <h3>Connect to remote console</h3>
             <input id="addressInput" type="text" placeholder="Server address">
             <div style="display: flex; column-gap: 4px; max-height: 40px;">
                 <input id="authKeyInput" type="password" placeholder="Server authentication key">
                 <button style="background-color: grey; line-height: 20px; margin: 0px !important;height: 36px;" onclick="authKeyInput.setAttribute('type', authKeyInput.getAttribute('type') == 'password' ? 'text' : 'password')">view</button>
             </div>
-            <input id="consoleInput" type="text" min="7" placeholder="Server console">
+            <div style="display: flex; column-gap: 4px; max-height: 40px;">
+                <input id="consoleInput" type="text" min="7" placeholder="Server console">
+                <button style="background-color: transparent; line-height: 20px; margin: 0px !important;height: 36px;border: 1px solid #aaa;color: darkgray;min-width: 36px;padding: 1px;"  data-tooltip="/dev/vcsa* devices only show ansi encoded screen content. Make use of a /dev/vcsu* device for unicode or a /dev/tty device to access a system terminal.">?</button>
+            </div>
             <input id="framerateInput" type="number" min="1" max="60" placeholder="Stream framerate">
             <button onclick="connect()">Connect to server</button>
         </div>
@@ -90,94 +101,6 @@
         const clientPacket = {
             Authenticate: 0,
             Input: 1
-        }
-
-        // https://github.com/torvalds/linux/blob/master/include/uapi/linux/input-event-codes.h
-        // We translate inputs to linux key codes so that they can pass through ioctl nicely.
-        const keyMap = {
-            "Escape": 1,
-            "Digit1": 2,
-            "Digit2": 3,
-            "Digit3": 4,
-            "Digit4": 5,
-            "Digit5": 6,
-            "Digit6": 7,
-            "Digit7": 8,
-            "Digit8": 9,
-            "Digit9": 10,
-            "Digit0": 11,
-            "Minus": 12,
-            "Equal": 13,
-            "Backspace": 14,
-            "Tab": 15,
-            "KeyQ":	16,
-            "KeyW":	17,
-            "KeyE":	18,
-            "KeyR":	19,
-            "KeyT":	20,
-            "KeyY":	21,
-            "KeyU":	22,
-            "KeyI":	23,
-            "KeyO":	24,
-            "KeyP":	25,
-            "BracketLeft": 26,
-            "BracketRight": 27,
-            "Enter": 28,
-            "ControlLeft": 29,
-            "KeyA":	30,
-            "KeyS":	31,
-            "KeyD":	32,
-            "KeyF":	33,
-            "KeyG":	34,
-            "KeyH":	35,
-            "KeyJ":	36,
-            "KeyK":	37,
-            "KeyL":	38,
-            "Semicolon": 39,
-            "Quote": 40, //dodgy
-            "Backquote": 41, // dodgy
-            "ShiftLeft": 42,
-            "IntlBackslash": 43,
-            "KeyZ": 44,
-            "KeyX":	45,
-            "KeyC":	46,
-            "KeyV":	47,
-            "KeyB":	48,
-            "KeyN":	49,
-            "KeyM":	50,
-            "Comma":51,
-            "Period": 52,
-            "Slash": 53,
-            "ShiftRight": 54,
-            "NumpadMultiply": 55, //dodgy
-            "AltLeft": 56,
-            "Space": 57,
-            "CapsLock": 58,
-            "F1": 59,
-            "F2": 60,
-            "F3": 61,
-            "F4": 62,
-            "F5": 63,
-            "F6": 64,
-            "F7": 65,
-            "F8": 66,
-            "F9": 67,
-            "F10": 68,
-            "NumLock": 69,
-            "ScrollLock": 70,
-            "Numpad7": 71,
-            "Numpad8": 72,
-            "Numpad9": 73,
-            "NumpadSubtract": 74,
-            "Numpad4": 75,
-            "Numpad5": 76,
-            "Numpad6": 77,
-            "NumpadAdd": 78,
-            "Numpad1": 79,
-            "Numpad2": 80,
-            "Numpad3": 81,
-            "Numpad0": 82,
-            "NumpadDecimal": 83
         }
 
         function connect() {
@@ -252,14 +175,14 @@
             }
         }
 
-        addEventListener('keydown', (event) => {
-            if (event.target != document.body || keyMap[event.code] == null) {
+        addEventListener("keydown", (event) => {
+            if (event.target != document.body) {
                 return
             }
 
             let buffer = new Uint8Array(2)
             buffer[0] = clientPacket.Input
-            buffer[1] = keyMap[event.code]
+            buffer[1] = event.key.charCodeAt(0)
 
             ws.send(buffer)
         })
