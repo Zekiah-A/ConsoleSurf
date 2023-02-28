@@ -115,7 +115,6 @@ void* render_loop(void* args) {
         nanosleep(&sleepTime, NULL);
     }
 
-    free(buffer);
     return NULL;
 }
 

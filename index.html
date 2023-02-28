@@ -56,7 +56,7 @@
             <article>
                 <header>
                     <h3>Error</h3>
-                    <label for="error_modal" class="close">&times;</label>
+                    <label for="error_modal" class="close" id="errorModalClose">&times;</label>
                 </header>
                 <section class="content" id="errorModalContent">
                     <!--Modal content will be placed here-->
@@ -86,10 +86,12 @@
             new Promise((resolve, reject) => {
                 errorModal.setAttribute("checked", true)
                 errorModalContent.innerText = text
-                errorModalDissmiss.addEventListener("click", () => {
+                function closeModal() {
                     errorModal.removeAttribute("checked")
                     resolve()
-                })
+                }
+                errorModalClose.addEventListener("click", closeModal)
+                errorModalDissmiss.addEventListener("click", closeModal)
             })
 
         const serverPacket = {
