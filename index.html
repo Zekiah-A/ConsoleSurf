@@ -124,10 +124,13 @@
                 document.body.style.backgroundColor = "darkGrey"
 
                 if (consoleInput.value.startsWith("/dev/vcsa")) {
-                    console.warn("WARNING: /dev/vcsa* devices do not support ioctl operations, see https://linux.die.net/man/4/vcsa")
+                    console.warn("WARNING: /dev/vcsa* devices do not support ioctl operations, and therefore do not permit user input, see https://linux.die.net/man/4/vcsa")
                 }
                 else if (consoleInput.value.startsWith("/dev/vcs")) {
-                    console.warn("WARNING: /dev/vcs* devices do not carry attributes, such as console width, font size and cursor position, see https://linux.die.net/man/4/vcs")
+                    console.warn("WARNING: /dev/vcs* devices do not carry attributes, such as console width, font size and cursor position, and do not permit ioctl, and therefore, can not permit user input, see https://linux.die.net/man/4/vcs")
+                }
+                else if (consoleInput.value.startsWith("/dev/vc") || consoleInput.value.startsWith("/dev/tty")) {
+                    console.warn("WARNING: /dev/vc* and /dev/tty* consoles permit user input. Proceed with caution when inputting characters here.")
                 }
             }
 
