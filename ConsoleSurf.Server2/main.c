@@ -270,14 +270,14 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
         int* tty_fd = get_client_file_descriptor(client);
         unsigned int mode = 0;
 
-        ioctl(*tty_fd, KDGKBMODE, &mode);
+        ioctl((*tty_fd), KDGKBMODE, &mode);
         if (mode != K_XLATE && mode != K_UNICODE) {          
             if (ioctl(*tty_fd, KDSKBMODE, K_UNICODE) == -1) {
                 perror("Error switching keyboard state");
             }
         }
         
-        if (ioctl(*tty_fd, TIOCSTI, msg + 1) == -1) {
+        if (ioctl((*tty_fd), TIOCSTI, msg + 1) == -1) {
             perror("Error pushing input char into console");
         }
     }

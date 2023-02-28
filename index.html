@@ -120,6 +120,13 @@
                 loginPrompt.style.display = "none"
                 content.style.display = "block"
                 document.body.style.backgroundColor = "darkGrey"
+
+                if (consoleInput.value.startsWith("/dev/vcsa")) {
+                    console.warn("WARNING: /dev/vcsa* devices do not support ioctl operations, see https://linux.die.net/man/4/vcsa")
+                }
+                else if (consoleInput.value.startsWith("/dev/vcs")) {
+                    console.warn("WARNING: /dev/vcs* devices do not carry attributes, such as console width, font size and cursor position, see https://linux.die.net/man/4/vcs")
+                }
             }
 
             ws.onmessage = async ({data}) => {
@@ -138,13 +145,15 @@
 
                 // Virtual consoles will start with a vidbuf struct (unsigned char vidbuf_lines; unsigned char vidbuf_columns;
                 // unsigned char vidbuf_curcolumn; unsigned char vidbuf_curline;). We use this to get a little info about the console.
-                if (firstReceive) {
+                // /dev/vcs[1−63] are character devices for virtual console terminals.
+                // /dev/vcsa[0−63] are the same, but using unsigned shorts (in host byte order) that include attributes, and prefixed with four bytes giving the screen dimensions and cursor position: lines, columns
+                if (firstReceive && consoleInput.value.startsWith("/dev/vcsa")) {
                     defaultVirtualWidth = data.getUint8(2)
                     virtualWidth = data.getUint8(2)
                     firstReceive = false
                 }
 
-                let buffer = decoder.decode(data.buffer.slice(5))
+                let buffer = decoder.decode(data.buffer.slice(consoleInput.value.startsWith("/dev/vcsa") ? 5 : 0))
                 buffer = buffer.replaceAll("\u0007", "") // Strip bell
 
                 // Draw to canvas
@@ -157,11 +166,13 @@
                     ctx.fillText(chunk, 0, (i / virtualWidth) * fontSize + fontSize) // i / virtualWidth = row
                 }
 
-                // We use the vidbuf info to draw a cursor at the current text position (with blink)
-                if ((frame % framerateInput.value) > framerateInput.value / 2) {
-                    ctx.fillRect(data.getUint8(3) * fontSize, data.getUint8(4) * fontSize, fontSize / 6, fontSize)
+                if (consoleInput.value.startsWith("/dev/vcsa")) {                    
+                    // We use the vidbuf info to draw a cursor at the current text position (with blink)
+                    if ((frame % framerateInput.value) > framerateInput.value / 2) {
+                        ctx.fillRect(data.getUint8(3) * fontSize, data.getUint8(4) * fontSize, fontSize / 6, fontSize)
+                    }
+                    frame++
                 }
-                frame++
             }
 
             ws.onclose = () => {
