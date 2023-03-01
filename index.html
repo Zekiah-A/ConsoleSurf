@@ -102,7 +102,8 @@
 
         const clientPacket = {
             Authenticate: 0,
-            Input: 1
+            InputKeyboard: 1,
+            InputMouse: 2
         }
 
         function connect() {
@@ -192,13 +193,34 @@
         }
 
         addEventListener("keydown", (event) => {
-            if (event.target != document.body) {
+            if (event.target != canvas) {
                 return
             }
 
             let buffer = new Uint8Array(2)
-            buffer[0] = clientPacket.Input
+            buffer[0] = clientPacket.InputKeyboard
             buffer[1] = event.key.charCodeAt(0)
+
+            ws.send(buffer)
+        })
+
+        canvas.addEventListener("mousedown", (event) => {
+            let buffer = new Uint8Array(6)
+            let view = new DataView(buffer);
+
+            buffer[0] = clientPacket.InputMouse
+            buffer[1] = event.button < 3 ? event.button : 0
+            view.setUint16(2, event.offsetX)
+            view.setUint16(4, event.offsetY)
+
+            ws.send(buffer)
+        })
+
+        canvas.addEventListener("wheel", (event) => {
+            let buffer = new Uint8Array(3);
+            buffer[0] = clientPacket.InputMouse
+            buffer[1] = 1
+            buffer[2] = event.deltaY > 0 ? 1 : -1 
 
             ws.send(buffer)
         })

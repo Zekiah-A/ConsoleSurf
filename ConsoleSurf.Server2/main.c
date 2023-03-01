@@ -1,4 +1,4 @@
-#include<errno.h>
+#include <errno.h>
 #include <termios.h>
 #include <sys/ioctl.h>
 #include <stdbool.h>
@@ -38,11 +38,11 @@
 
 
 char authKey[37];
-pthread_t threads[256];
+pthread_t threads[MAX_CLIENTS];
 int threads_top = 0;
 
-int rateLimiterDates[256];
-char* rateLimiterIps[256];
+int rateLimiterDates[MAX_CLIENTS];
+char* rateLimiterIps[MAX_CLIENTS];
 int rate_limiter_top = 0;
 
 int clients_top = 0;
@@ -53,7 +53,7 @@ struct render_args {
     char cancellationToken;
     ws_cli_conn_t* client;
 };
-struct render_args clients_render_args[256];
+struct render_args clients_render_args[MAX_CLIENTS];
 
 struct ws_connection {
     int client_sock; /**< Client socket FD.        */
@@ -114,11 +114,11 @@ void* render_loop(void* args) {
     memmove(threads + index - 1, threads + index, threads_top * sizeof(pthread_t) - index * sizeof(pthread_t));
     threads_top--;
 
-    // We wait for mutex to unlock, so we ensure the final buffer packet is all sent,
-    // and buffer is no longer being used before freeing it, unfortunately we have to use
-    // a spin lock to wait for unlock because server library emits no signal on compeltion.
+    // We wait for mutex to unlock, so we ensure the buffer
+    // is not in use, library has no signal so we spin
     while (pthread_mutex_trylock(&r_args->client->mtx_snd) == EBUSY) {
         // Mutex is still locked, so spin (block)
+        sleep(1);
     }
     pthread_mutex_unlock(&r_args->client->mtx_snd);
     free(buffer);
@@ -130,7 +130,7 @@ int rate_limiter_authorised(char* ip, int extendIfNot) {
     int foundIndex = -1;
     int currentTime = time(NULL);
 
-    for (int i = 0; i < 256; i++) {
+    for (int i = 0; i < MAX_CLIENTS; i++) {
         if (rateLimiterIps[i] != NULL && strcmp(ip, rateLimiterIps[i]) == 0) {
             foundIndex = i;
         }
@@ -175,7 +175,8 @@ void onopen(ws_cli_conn_t *client) {
 void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, int type) {
     if (msg[0] == (char) CLIENT_AUTHENTICATE) {
         if (clients_top >= 255) {
-            printf("Client overflow error - server can not handle more than 256 concurrently connected clients\n");
+            printf("Client overflow error - server can not handle more"
+                   "than %d concurrently connected clients\n", MAX_CLIENTS);
             char err = SERVER_FULL_ERROR;
             ws_sendframe_bin(client, &err, 1);
             return;
@@ -201,9 +202,10 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
         FILE *fptr = fopen(consolePath, "r");
         if (fileDescriptor == -1 || fptr == NULL) {
             DIR* dir = opendir("/dev/");
-            struct dirent* entry;
             int dir_length = 0;
             int dir_count = 0;
+            struct dirent* entry;
+
             while ((entry = readdir(dir)) != NULL) {
                 if (strncmp("vc", entry->d_name, 2) != 0 && strncmp("tty", entry->d_name, 3) != 0) {
                     continue;
@@ -228,10 +230,6 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
                 err_length += name_len + 6;
             }
 
-            for (int i = 0; i < err_length; i++) {
-                printf("%c", err[i]);
-            }
-
             ws_sendframe_bin(client, err, err_length);
             closedir(dir);
             return;
@@ -251,7 +249,6 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
             }
         }
         
-        // Create a new render task thread on the stack
         struct render_args* args = &clients_render_args[clients_top];
         args->fileDescriptor = fileDescriptor;
         args->length = flength(fptr);
@@ -289,7 +286,7 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
         int index = get_client_index(client);
         // code (byte), mouse button (byte), value (double for X & Y),
         // if mouse wheel, will also have an up.down (byte)
-        if (size < 6 || index == -1) {
+        if (size < 3 || index == -1) {
             char err = SERVER_AUTHENTICATION_ERROR;
             ws_sendframe_bin(client, &err, 1);
             return;
@@ -306,7 +303,7 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
         ioctl(tty_fd, UI_SET_RELBIT, REL_WHEEL);
 
         // Set up mouse device
-        memset(&uinp, 0, sizeof(uinp)); // Set all to 0
+        memset(&uinp, 0, sizeof(uinp));
         strncpy(uinp.name, "consolesurf", UINPUT_MAX_NAME_SIZE);
         uinp.id.version = 4;
         uinp.id.bustype = BUS_USB;
@@ -322,7 +319,7 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
         // Send mouse events
         struct input_event ev;
         memset(&ev, 0, sizeof(ev));
-        
+
         if (size == 6 && (msg[1] == (char) INPUT_MOUSE_LEFT || msg[1] == (char) INPUT_MOUSE_RIGHT)) {
             ev.type = EV_ABS;
             ev.code = ABS_X;
@@ -333,20 +330,19 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
             ev.code = ABS_Y;
             memcpy(&ev.value, msg + 4, 2);
             write(tty_fd, &ev, sizeof(ev));
-        
+
             ev.type = EV_KEY;
             ev.code = (msg[1] == INPUT_MOUSE_LEFT ? BTN_LEFT : BTN_RIGHT);
             ev.value = 1;
             write(tty_fd, &ev, sizeof(ev));
         }
-        else if (size == 7 && msg[1] == (char) INPUT_MOUSE_WHEEL) {
+        else if (size == 3 && msg[1] == (char) INPUT_MOUSE_WHEEL) {
             ev.type = EV_REL;
             ev.code = REL_WHEEL;
             ev.value = (msg[6] == 1 ? 1 : -1);
             write(tty_fd, &ev, sizeof(ev));
         }
 
-        // Destroy mouse device
         ioctl(tty_fd, UI_DEV_DESTROY);
     }
 }
@@ -366,7 +362,7 @@ char* generate_auth_key() {
     static char base16_chars[16] = "0123456789abcdef";
     static char buf[37];
 
-    //gen random for all spaces because lazy
+    srand(time(0))
     for (int i = 0; i < 36; i++) {
         buf[i] = base16_chars[rand() % 16];
     }
@@ -396,7 +392,7 @@ int main() {
         printf("Created auth key file! A secure, randomly generated UUID has"
                "been placed into this file for use of client authentication. You may"
                "replace this key with your own (must be of length 36) by modifying the file ");
-        printf("'%s/authkey.txt'min.\n", cwd);
+        printf("'%s/authkey.txt'.\n", cwd);
     }
 
     fread(authKey, 1, 36, fptr);
