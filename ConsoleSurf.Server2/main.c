@@ -1,3 +1,4 @@
+#include<errno.h>
 #include <termios.h>
 #include <sys/ioctl.h>
 #include <stdbool.h>
@@ -104,6 +105,23 @@ void* render_loop(void* args) {
         ws_sendframe_bin(r_args->client, buffer, r_args->length);
         nanosleep(&sleepTime, NULL);
     }
+
+    // Once we are super sure we are done, we can try to clean ourselves up,
+    // splicing ourselves out of the render args and freeing some mem.
+    int index = get_client_index(r_args->client);
+    memmove(clients_render_args + index - 1, clients_render_args + index, clients_top * sizeof(clients_render_args) - index * sizeof(clients_render_args));
+    clients_top--;
+    memmove(threads + index - 1, threads + index, threads_top * sizeof(pthread_t) - index * sizeof(pthread_t));
+    threads_top--;
+
+    // We wait for mutex to unlock, so we ensure the final buffer packet is all sent,
+    // and buffer is no longer being used before freeing it, unfortunately we have to use
+    // a spin lock to wait for unlock because server library emits no signal on compeltion.
+    while (pthread_mutex_trylock(&r_args->client->mtx_snd) == EBUSY) {
+        // Mutex is still locked, so spin (block)
+    }
+    pthread_mutex_unlock(&r_args->client->mtx_snd);
+    free(buffer);
 
     return NULL;
 }
@@ -339,10 +357,9 @@ void onclose(ws_cli_conn_t *client) {
         return;
     }
 
+    // When the client thread eventually sees this, it will trigger that thread
+    // to start cleaning itself up.
     clients_render_args[index].cancellationToken = 0;
-
-    // TODO: We need a good solution for ultimately removing
-    // client render args, and their respective threads from the array
 }
 
 char* generate_auth_key() {
