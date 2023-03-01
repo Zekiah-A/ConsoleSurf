@@ -7,46 +7,52 @@
 #include "wsServer/include/ws.h"
 #include <fcntl.h>
 #include <string.h>
-#include <linux/types.h>
-#include <linux/kd.h>
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <arpa/inet.h>
 #include <dirent.h>
+#include <linux/types.h>
+#include <linux/kd.h>
+#include <linux/input.h>
+#include <linux/uinput.h>
 
 #undef MAX_CLIENTS
 #define MAX_CLIENTS 256
 
 #define CLIENT_AUTHENTICATE 0
-#define CLIENT_INPUT 1
+#define CLIENT_INPUT_KEYBOARD 1
+#define CLIENT_INPUT_MOUSE 2
 
 #define SERVER_AUTHENTICATION_ERROR 0
 #define SERVER_CONSOLE_NOT_FOUND_ERROR 1
 #define SERVER_CONSOLE 2
 #define SERVER_FULL_ERROR 3
 
+#define INPUT_MOUSE_LEFT 0
+#define INPUT_MOUSE_WHEEL 1
+#define INPUT_MOUSE_RIGHT 2
+
 #define RATE_LIMITER_PERIOD 3
+
 
 char authKey[37];
 pthread_t threads[256];
 int threads_top = 0;
 
-char clientCancellationTokens[256];
-int clientFileDescriptors[256];
-int clients_top = 0;
-
 int rateLimiterDates[256];
 char* rateLimiterIps[256];
 int rate_limiter_top = 0;
 
+int clients_top = 0;
 struct render_args {
     int fileDescriptor;
     int length;
     long frameInterval;
-    char* cancellationToken;
+    char cancellationToken;
     ws_cli_conn_t* client;
 };
+struct render_args clients_render_args[256];
 
 struct ws_connection {
     int client_sock; /**< Client socket FD.        */
@@ -84,22 +90,6 @@ int get_client_index(ws_cli_conn_t* client) {
     return -1;
 }
 
-int* get_client_file_descriptor(ws_cli_conn_t* client) {
-    for (int i = 0; i < clients_top; i++) {
-        if (_client_socks_location + i == client) {
-            return &clientFileDescriptors[i];
-        }
-    } 
-}
-
-char* get_client_cancellation_token(ws_cli_conn_t* client) {
-    for (int i = 0; i < clients_top; i++) {
-        if (_client_socks_location + i == client) {
-            return &clientCancellationTokens[i];
-        }
-    } 
-}
-
 void* render_loop(void* args) {
     struct render_args* r_args = (struct render_args*) args;
     struct timespec sleepTime;
@@ -109,7 +99,7 @@ void* render_loop(void* args) {
     char* buffer = malloc(r_args->length + 1);
     buffer[0] = SERVER_CONSOLE;
 
-    while (*(r_args->cancellationToken) == 1) {
+    while (r_args->cancellationToken == 1) {
         read(r_args->fileDescriptor, buffer + 1, (unsigned int) r_args->length);
         ws_sendframe_bin(r_args->client, buffer, r_args->length);
         nanosleep(&sleepTime, NULL);
@@ -244,21 +234,18 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
         }
         
         // Create a new render task thread on the stack
-        struct render_args* args = malloc(sizeof(struct render_args));
+        struct render_args* args = &clients_render_args[clients_top];
         args->fileDescriptor = fileDescriptor;
         args->length = flength(fptr);
         args->frameInterval = frameInterval;
-        args->cancellationToken = &clientCancellationTokens[clients_top];
+        args->cancellationToken = 1;
         args->client = client;
+        clients_top++;
 
         pthread_create(threads + threads_top, NULL, render_loop, args);
         threads_top++;
-
-        clientCancellationTokens[clients_top] = 1;
-        clientFileDescriptors[clients_top] = fileDescriptor;
-        clients_top++;
     }
-    else if (msg[0] == (char) CLIENT_INPUT) {
+    else if (msg[0] == (char) CLIENT_INPUT_KEYBOARD) {
         int index = get_client_index(client);
         if (size != 2 || index == -1) {
             char err = SERVER_AUTHENTICATION_ERROR;
@@ -266,19 +253,83 @@ void onmessage(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, i
             return;
         }
 
-        int* tty_fd = get_client_file_descriptor(client);
+        int tty_fd = clients_render_args[index].fileDescriptor;
         unsigned int mode = 0;
 
-        ioctl((*tty_fd), KDGKBMODE, &mode);
+        ioctl(tty_fd, KDGKBMODE, &mode);
         if (mode != K_XLATE && mode != K_UNICODE) {          
-            if (ioctl(*tty_fd, KDSKBMODE, K_UNICODE) == -1) {
+            if (ioctl(tty_fd, KDSKBMODE, K_UNICODE) == -1) {
                 perror("Error switching keyboard state");
             }
         }
         
-        if (ioctl((*tty_fd), TIOCSTI, msg + 1) == -1) {
+        if (ioctl(tty_fd, TIOCSTI, msg + 1) == -1) {
             perror("Error pushing input char into console");
         }
+    }
+    else if (msg[0] == (char) CLIENT_INPUT_MOUSE) {
+        int index = get_client_index(client);
+        // code (byte), mouse button (byte), value (double for X & Y),
+        // if mouse wheel, will also have an up.down (byte)
+        if (size < 6 || index == -1) {
+            char err = SERVER_AUTHENTICATION_ERROR;
+            ws_sendframe_bin(client, &err, 1);
+            return;
+        }
+
+        int tty_fd = clients_render_args[index].fileDescriptor;
+        struct uinput_user_dev uinp;
+
+        // Enable mouse events
+        ioctl(tty_fd, UI_SET_EVBIT, EV_KEY);
+        ioctl(tty_fd, UI_SET_EVBIT, EV_ABS);
+        ioctl(tty_fd, UI_SET_RELBIT, ABS_X);
+        ioctl(tty_fd, UI_SET_RELBIT, ABS_Y);
+        ioctl(tty_fd, UI_SET_RELBIT, REL_WHEEL);
+
+        // Set up mouse device
+        memset(&uinp, 0, sizeof(uinp)); // Set all to 0
+        strncpy(uinp.name, "consolesurf", UINPUT_MAX_NAME_SIZE);
+        uinp.id.version = 4;
+        uinp.id.bustype = BUS_USB;
+        uinp.id.vendor = 0x1234;
+        uinp.id.product = 0x5678;
+        write(tty_fd, &uinp, sizeof(uinp));
+
+        // Create mouse device in the TTY
+        if (ioctl(tty_fd, UI_DEV_CREATE) == -1) {
+            perror("Error creating mouse device in console");
+        }
+
+        // Send mouse events
+        struct input_event ev;
+        memset(&ev, 0, sizeof(ev));
+        
+        if (size == 6 && (msg[1] == (char) INPUT_MOUSE_LEFT || msg[1] == (char) INPUT_MOUSE_RIGHT)) {
+            ev.type = EV_ABS;
+            ev.code = ABS_X;
+            memcpy(&ev.value, msg + 2, 2);
+            write(tty_fd, &ev, sizeof(ev));
+
+            ev.type = EV_ABS;
+            ev.code = ABS_Y;
+            memcpy(&ev.value, msg + 4, 2);
+            write(tty_fd, &ev, sizeof(ev));
+        
+            ev.type = EV_KEY;
+            ev.code = (msg[1] == INPUT_MOUSE_LEFT ? BTN_LEFT : BTN_RIGHT);
+            ev.value = 1;
+            write(tty_fd, &ev, sizeof(ev));
+        }
+        else if (size == 7 && msg[1] == (char) INPUT_MOUSE_WHEEL) {
+            ev.type = EV_REL;
+            ev.code = REL_WHEEL;
+            ev.value = (msg[6] == 1 ? 1 : -1);
+            write(tty_fd, &ev, sizeof(ev));
+        }
+
+        // Destroy mouse device
+        ioctl(tty_fd, UI_DEV_DESTROY);
     }
 }
 
@@ -288,11 +339,10 @@ void onclose(ws_cli_conn_t *client) {
         return;
     }
 
-    *get_client_cancellation_token(client) = 0;
-    // Splice this client out of the client cancellation token and file descriptor array
-    memmove(&clientCancellationTokens + index, &clientCancellationTokens + index - 1, clients_top - index - 1);
-    memmove(&clientFileDescriptors + index * 4, &clientFileDescriptors + index * 4 - 4, clients_top - (index * 4) - 4);
-    clients_top--;
+    clients_render_args[index].cancellationToken = 0;
+
+    // TODO: We need a good solution for ultimately removing
+    // client render args, and their respective threads from the array
 }
 
 char* generate_auth_key() {
